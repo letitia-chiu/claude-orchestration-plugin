@@ -1,0 +1,10 @@
+{
+  "name": "orchestration",
+  "displayName": "統籌–執行分層工作流",
+  "description": "把「統籌拆單、執行者分層動手」的工作流打包成可跨專案安裝的 slash 命令與子代理。",
+  "version": "0.1.0",
+  "author": {
+    "name": "letitia-chiu"
+  },
+  "keywords": ["orchestration", "subagents", "workflow"]
+}

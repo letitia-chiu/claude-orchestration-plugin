@@ -1,0 +1,14 @@
+{
+  "name": "orchestration-marketplace",
+  "description": "把「統籌拆單、執行者分層動手」的工作流打包成可跨專案安裝的 slash 命令與子代理。",
+  "owner": {
+    "name": "letitia-chiu"
+  },
+  "plugins": [
+    {
+      "name": "orchestration",
+      "source": "./",
+      "description": "把「統籌拆單、執行者分層動手」的工作流打包成可跨專案安裝的 slash 命令與子代理。"
+    }
+  ]
+}
