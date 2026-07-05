@@ -4,14 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.1.0] - 2026-07-05
+## [0.2.0] - 2026-07-05
 
-First public release.
+First public release: open-source packaging and multi-language documentation.
 
 ### Added
 
 - MIT `LICENSE`.
-- `CONTRIBUTING.md` with project structure, local development, and contribution guidelines.
 - `.gitignore` covering common OS, editor, and dependency artifacts.
 - `CHANGELOG.md` (this file).
 - `license`, `repository`, and `homepage` metadata in `.claude-plugin/plugin.json`.
@@ -24,3 +23,7 @@ First public release.
 - Documented language-mirroring as an explicit orchestrator discipline (語言律) in the playbook methodology — `docs/playbook/orchestration.md`, the wrap-up reporting step in `docs/playbook/README.md`, and their templates embedded in `commands/init-playbook.md` — so the guarantee ships beyond the 7 command/agent files.
 
 Deferred — multilingual translation of docs/playbook/ skeletons, universal-lessons.md, and init-playbook's embedded templates (currently Traditional Chinese).
+
+## [0.1.0] - 2026-07-05
+
+- Initial internal version: the Traditional-Chinese orchestration plugin (scout / worker / executor tiers plus the four slash commands), before open-source packaging.

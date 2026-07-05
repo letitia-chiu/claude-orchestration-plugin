@@ -59,10 +59,6 @@ Orchestrator（主 session — 可用的最强模型 + 高投入）
 
 这份领域知识的入口是 `/orchestration:init-playbook`：它会在目标项目生成一份空的 `docs/playbook/` 骨架（包含通用的 `orchestration.md`、作为 `known-failures.md` 起点的一组中性通用工程教训种子，以及待填字段的模板文件），该项目再通过自身的开发过程一条一条填进去。引擎可以安装到任何地方；领域知识则只能在项目自己内部生长。
 
-## 贡献
-
-欢迎贡献——尤其是 README 翻译与修正。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。核心规则：命令与 agent 一律用英文编写，并且**必须保留语言镜像指令**，让助手始终用用户自己的语言与用户对话。
-
 ## 许可证
 
 [MIT](LICENSE) © 2026 letitia-chiu

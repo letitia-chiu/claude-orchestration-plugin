@@ -59,10 +59,6 @@ It deliberately does **not** ship your project's domain knowledge: the hard rule
 
 The entry point for that domain knowledge is `/orchestration:init-playbook`: it generates an empty `docs/playbook/` skeleton in the target project (including the generic `orchestration.md`, a neutral seed of universal engineering lessons as the start of `known-failures.md`, and template files with fields to fill in), which that project then fills in one entry at a time through its own development. The engine installs anywhere; the domain knowledge can only be grown inside its own project.
 
-## Contributing
-
-Contributions — especially README translations and fixes — are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). The core rule: commands and agents are authored in English and **must keep their language-mirroring directive** so the assistant always talks to users in the users' own language.
-
 ## License
 
 [MIT](LICENSE) © 2026 letitia-chiu
