@@ -1,10 +1,12 @@
 ---
-description: 收尾儀式：驗證電池 → 舊坑檢查 → 交班（快照＋commit）
+description: "Wrap-up ritual: verification battery → known-failures check → handoff (snapshot + commit)"
 ---
-讀「目標專案的」`docs/playbook/README.md`；不存在＝提示先跑 `/orchestration:init-playbook`。照其收尾清單執行（缺一不算完成）：
+> **Language — always respond in the user's language.** This file is written in English for maintainability. English is the language of these *instructions*, not of your *output*. Converse with, question, and report to the user in the same language they write to you in: Traditional Chinese in → Traditional Chinese out; Simplified Chinese → Simplified Chinese; Japanese → Japanese; English → English. Never switch to English just because this file happens to be in English.
 
-1. `docs/playbook/review-rubric.md` 驗證電池依變更類型跑完，記指紋（測試總數＋bundle 名等，依專案而定）。
-2. `docs/playbook/known-failures.md` 快掃：有沒有踩回舊坑？產生新坑＝同 commit 入館。
-3. `docs/playbook/architecture-constraints.md` 鐵律自查。
-4. 若專案有交班慣例，照其 `docs/playbook/handoff-template.md` 更新交班快照（新條目插最上；收官條目過多＝把舊的搬歷史檔）＋（若有）其他隨交班同步的狀態檔案，commit（工單則依專案的狀態蓋章慣例標記完成）。
-5. 完成回報三段式：①改了什麼 ②在哪驗過（附實跑輸出）③請使用者驗什麼＋**怎麼體驗（確切路徑）**。
+Read the **target project's** `docs/playbook/README.md`; if it doesn't exist, prompt the user to run `/orchestration:init-playbook` first. Follow its wrap-up checklist (missing any item = not done):
+
+1. Run the `docs/playbook/review-rubric.md` verification battery appropriate to the change type, and record the fingerprint (total test count, bundle name, etc. — project-dependent).
+2. Quick-scan `docs/playbook/known-failures.md`: did you step back into an old pit? Any new pit = add it to the museum in the same commit.
+3. Self-check against `docs/playbook/architecture-constraints.md` hard rules.
+4. If the project has a handoff convention, update the handoff snapshot per its `docs/playbook/handoff-template.md` (insert the new entry at the top; if there are too many closed-out entries, move the old ones to a history file) + any other status files that are synced alongside handoffs, then commit (for dispatch orders, mark them done per the project's status-stamping convention).
+5. Report completion in three parts: ① what changed ② where it was verified (with actual command output) ③ what the user should verify + **exactly how to try it (the precise path)**.

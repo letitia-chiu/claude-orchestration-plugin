@@ -1,14 +1,16 @@
 ---
-description: 開工儀式：盲區 pass → 提問 → 計畫（照 playbook）
-argument-hint: 任務描述
+description: "Kickoff ritual: blind-spot pass → questions → plan (per the playbook)"
+argument-hint: task description
 ---
-任務：$ARGUMENTS
+> **Language — always respond in the user's language.** This file is written in English for maintainability. English is the language of these *instructions*, not of your *output*. Converse with, question, and report to the user in the same language they write to you in: Traditional Chinese in → Traditional Chinese out; Simplified Chinese → Simplified Chinese; Japanese → Japanese; English → English. Never switch to English just because this file happens to be in English.
 
-讀「目標專案的」`docs/playbook/README.md`；不存在＝提示先跑 `/orchestration:init-playbook`。照其開工流程執行：
+Task: $ARGUMENTS
 
-1. 讀專案交班快照（若有）最新條目＋`docs/playbook/unknowns-interview.md`＋`docs/playbook/architecture-constraints.md` §鐵律（依任務類型照 README 檔案地圖補讀對應文件）。
-2. **盲區 pass**：interview 第一步清單逐格自答（機器/環境、任務形狀、行為矩陣、使用者體驗），答不出的老實列成 unknowns。需要查 code 現況的疑問派 scout 去查，不要自己大量讀檔。
-3. **提問**：只問五類、最多 3 個、每個附推薦選項（interview 第二步門檻）。
-4. **計畫**：先寫最可能變動、最需要確認的部分；標風險門（遇到就停的情況）；標**派工切分**（哪些自己做、哪些派 scout/worker/executor/外部模型覆核，判準見 `docs/playbook/orchestration.md`）。
+Read the **target project's** `docs/playbook/README.md`; if it doesn't exist, prompt the user to run `/orchestration:init-playbook` first. Follow its kickoff flow:
 
-輸出以上四項後等確認再動手；任務明顯很小且可逆時可直接開做，但假設要寫出來。
+1. Read the project's latest handoff snapshot entry (if any) + `docs/playbook/unknowns-interview.md` + `docs/playbook/architecture-constraints.md` §hard rules (per the README's file map, read the corresponding docs for this task type).
+2. **Blind-spot pass**: answer the interview's step-1 checklist item by item (machine/environment, task shape, behavior matrix, user experience); be honest about what you can't answer — list those as unknowns. For questions that need current code state, dispatch a scout rather than reading a lot of files yourself.
+3. **Questions**: ask only within the five categories, max 3 questions, each with a recommended option (interview step 2's question threshold).
+4. **Plan**: write up the parts most likely to change and most in need of confirmation first; flag risk gates (situations where you must stop); flag the **dispatch breakdown** (what you do yourself vs. what you dispatch to scout/worker/executor/an external model for review — decision criteria in `docs/playbook/orchestration.md`).
+
+Output the above four items and wait for confirmation before proceeding; if the task is clearly small and reversible you may proceed directly, but still write out your assumptions.

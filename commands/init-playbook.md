@@ -1,15 +1,19 @@
 ---
-description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層工作流的方法層文件）
+description: Generate the docs/playbook/ skeleton in the current project (the methodology-layer docs for the orchestrate-and-delegate workflow)
 ---
-在**目前（目標）專案**的 `docs/playbook/` 目錄下生成骨架文件。
+> **Language — always respond in the user's language.** This file is written in English for maintainability. English is the language of these *instructions*, not of your *output*. Converse with, question, and report to the user in the same language they write to you in: Traditional Chinese in → Traditional Chinese out; Simplified Chinese → Simplified Chinese; Japanese → Japanese; English → English. Never switch to English just because this file happens to be in English.
 
-**規則**：對以下每一個檔案，先檢查目標專案 `docs/playbook/<檔名>` 是否已存在。**已存在＝跳過、不覆蓋**（把跳過的檔名列進最終回報）；**不存在＝照下方附帶內容原樣建立**。全部處理完後，回報「建立了哪些檔、跳過了哪些檔」。
+Generate skeleton files under `docs/playbook/` in the **current (target) project**.
 
-共 10 個檔案：`README.md`、`orchestration.md`、`architecture-constraints.md`、`unknowns-interview.md`、`review-rubric.md`、`debug-playbook.md`、`known-failures.md`、`handoff-template.md`、`implementation-notes-template.md`、`task-routing.md`。
+**Rules**: for each file below, first check whether `docs/playbook/<filename>` already exists in the target project. **Exists = skip, don't overwrite** (list skipped filenames in the final report); **doesn't exist = create it verbatim with the content attached below**. After processing all of them, report "which files were created, which were skipped."
+
+10 files total: `README.md`, `orchestration.md`, `architecture-constraints.md`, `unknowns-interview.md`, `review-rubric.md`, `debug-playbook.md`, `known-failures.md`, `handoff-template.md`, `implementation-notes-template.md`, `task-routing.md`.
 
 ---
 
-## 檔案 1／10：`docs/playbook/README.md`
+> NOTE: The playbook skeleton content below is currently authored in Traditional Chinese; multilingual generation is planned (see CHANGELOG).
+
+## File 1/10: `docs/playbook/README.md`
 
 ```markdown
 # playbook（統籌–執行分層工作流：方法層）
@@ -55,7 +59,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 2. `known-failures.md` 快掃：有沒有踩回舊坑？產生新坑就**當場同 commit 入館**。
 3. 對照 `architecture-constraints.md` 鐵律自查。
 4. 照 `handoff-template.md` 更新交班快照＋commit。
-5. 完成回報三段式（見下方慣例）＋告訴使用者「怎麼體驗」的確切路徑。
+5. 完成回報三段式（見下方慣例）、**用使用者的語言**回報（見 `orchestration.md` §語言律）＋告訴使用者「怎麼體驗」的確切路徑。
 
 ## 維護規則（這是活文件）
 
@@ -66,7 +70,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 檔案 2／10：`docs/playbook/orchestration.md`
+## File 2/10: `docs/playbook/orchestration.md`
 
 ```markdown
 # 統籌–執行分層（orchestration：主窗當腦、分身動手）
@@ -104,6 +108,16 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 3. **規格不清不派工**：模糊在統籌層解決（盲區 pass、問使用者、讀 code 確認）。中低階模型的品質＝工單品質；把模糊派下去＝把判斷外包給不該判斷的人。
 4. **驗收在統籌**：照 `review-rubric.md` 電池，且至少**親手抽驗一項**可機械驗證的項目（跑一次測試/curl/grep）。執行者的回報是線索，不是證據。
 5. **該自己做的別硬派**：架構判斷、產品語氣/人格類 prompt、精密單檔手術、寫給人讀的關鍵文檔、10 分鐘內的小事。這些派工開銷（寫單＋驗收）大於自做，直接做。
+
+## 語言律（貫穿全程，凌駕形式）
+
+統籌對使用者的**每一次**對話、提問、進度、回報，一律**鏡射使用者當下的語言**——講繁中回繁中、講日文回日文、講英文回英文。
+
+分清兩層、別混：
+- **產出物內容**（檔名、程式碼、frontmatter 值、刻意以英文為基準的命令／agent 腳本）維持原文。
+- **你對使用者說的話**（結論、標題、分段、提問）跟著使用者走。
+
+命令／agent 腳本英文化，只是「給模型讀的指令」用英文，不是你的輸出語言。長 session 尤其容易漂成英文——這是明確失敗模式，收尾回報時務必自檢。
 
 ## 派誰（判準表）
 
@@ -151,7 +165,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 檔案 3／10：`docs/playbook/architecture-constraints.md`
+## File 3/10: `docs/playbook/architecture-constraints.md`
 
 ```markdown
 # 架構鐵律與約束
@@ -172,7 +186,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 檔案 4／10：`docs/playbook/unknowns-interview.md`
+## File 4/10: `docs/playbook/unknowns-interview.md`
 
 ```markdown
 # 開工盲區訪談
@@ -193,7 +207,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 檔案 5／10：`docs/playbook/review-rubric.md`
+## File 5/10: `docs/playbook/review-rubric.md`
 
 ```markdown
 # 驗證電池與審查準則
@@ -214,7 +228,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 檔案 6／10：`docs/playbook/debug-playbook.md`
+## File 6/10: `docs/playbook/debug-playbook.md`
 
 ```markdown
 # 除錯手冊
@@ -235,7 +249,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 檔案 7／10：`docs/playbook/known-failures.md`
+## File 7/10: `docs/playbook/known-failures.md`
 
 ```markdown
 # 踩坑博物館
@@ -285,7 +299,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 檔案 8／10：`docs/playbook/handoff-template.md`
+## File 8/10: `docs/playbook/handoff-template.md`
 
 ```markdown
 # 交班模板
@@ -306,7 +320,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 檔案 9／10：`docs/playbook/implementation-notes-template.md`
+## File 9/10: `docs/playbook/implementation-notes-template.md`
 
 ```markdown
 # 實作筆記模板
@@ -327,7 +341,7 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 檔案 10／10：`docs/playbook/task-routing.md`
+## File 10/10: `docs/playbook/task-routing.md`
 
 ```markdown
 # 模型分工與任務路由
@@ -348,6 +362,6 @@ description: 在目前專案生成 docs/playbook/ 骨架（統籌–執行分層
 
 ---
 
-## 執行後回報格式
+## Post-run report format
 
-先一句結論（建立了 N 個新檔、跳過了 M 個既有檔）→ 逐檔列出「建立」或「跳過（已存在）」。
+Lead with one sentence of conclusion (created N new files, skipped M existing files) → then list each file as "created" or "skipped (already exists)".

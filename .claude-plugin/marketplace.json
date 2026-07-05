@@ -1,6 +1,6 @@
 {
   "name": "orchestration-marketplace",
-  "description": "把「統籌拆單、執行者分層動手」的工作流打包成可跨專案安裝的 slash 命令與子代理。",
+  "description": "A cross-project set of slash commands and subagents for an orchestrate-and-delegate workflow: the main session plans, breaks down, and dispatches work; layered subagents (scout / worker / executor) carry it out.",
   "owner": {
     "name": "letitia-chiu"
   },
@@ -8,7 +8,7 @@
     {
       "name": "orchestration",
       "source": "./",
-      "description": "把「統籌拆單、執行者分層動手」的工作流打包成可跨專案安裝的 slash 命令與子代理。"
+      "description": "A cross-project set of slash commands and subagents for an orchestrate-and-delegate workflow: the main session plans, breaks down, and dispatches work; layered subagents (scout / worker / executor) carry it out."
     }
   ]
 }

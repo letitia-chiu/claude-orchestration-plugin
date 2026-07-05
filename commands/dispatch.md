@@ -1,12 +1,14 @@
 ---
-description: 把任務轉成派工單、派給正確階層（scout/worker/executor/外部模型）
-argument-hint: 要派出去的任務
+description: Turn a task into a dispatch order and send it to the right tier (scout/worker/executor/external model)
+argument-hint: the task to dispatch
 ---
-要派的任務：$ARGUMENTS
+> **Language — always respond in the user's language.** This file is written in English for maintainability. English is the language of these *instructions*, not of your *output*. Converse with, question, and report to the user in the same language they write to you in: Traditional Chinese in → Traditional Chinese out; Simplified Chinese → Simplified Chinese; Japanese → Japanese; English → English. Never switch to English just because this file happens to be in English.
 
-讀「目標專案的」`docs/playbook/orchestration.md`；不存在＝提示先跑 `/orchestration:init-playbook`。照其內容執行：
+Task to dispatch: $ARGUMENTS
 
-1. **選階層**（判準表）：唯讀偵察→scout；規格明確的一般活→worker；已規格化的難活→executor；高風險交叉覆核→外部模型覆核工單（若專案有委派範本則照其格式）。屬於「該統籌自己做」的（判斷/語氣/精密小修/10 分鐘小事）就不要派，直接做。
-2. **寫內部派工單**（六欄缺一不可）：【目標】【範圍】【禁區】【規格】【驗收＝可機械驗證的命令＋期望輸出】【回報格式】。規格不清先補清（查 code、問使用者），不准把模糊派下去。
-3. 用 Task 工具以對應 agent 類型派出，工單全文當 prompt；互不依賴的單平行派齊。
-4. **收單驗收**：照【驗收】逐項對，統籌至少親手抽驗一項；不合格＝退單重做或升級階層；執行者回報的 blocker＝統籌補規格後重派。
+Read the **target project's** `docs/playbook/orchestration.md`; if it doesn't exist, prompt the user to run `/orchestration:init-playbook` first. Follow its content:
+
+1. **Pick the tier** (decision table): read-only reconnaissance → scout; general work with a clear spec → worker; hard work that's already been spec'd → executor; high-risk cross-checking → an external-model review dispatch order (if the project has a delegation template, follow its format). Things the orchestrator should do itself (judgment calls/tone/precision micro-edits/10-minute tasks) should not be dispatched — do them directly.
+2. **Write the internal dispatch order** (all six sections required): 【Goal】【Scope】【No-go zones】【Spec】【Acceptance — mechanically verifiable commands + expected output】【Report format】. If the spec is unclear, clarify it first (check the code, ask the user) — never dispatch something ambiguous.
+3. Dispatch via the Task tool with the matching agent type, using the full dispatch order as the prompt; dispatch independent orders in parallel.
+4. **Review on receipt**: check against the 【Acceptance】 items one by one; the orchestrator must personally spot-check at least one item. Not passing = send it back for rework or escalate to a higher tier; a blocker reported by the executing tier = the orchestrator fills in the missing spec and redispatches.

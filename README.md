@@ -1,52 +1,68 @@
-# orchestration — 統籌–執行分層工作流（Claude Code plugin）
+# orchestration — an orchestrate-and-delegate workflow for Claude Code
 
-把「統籌拆單、執行者分層動手」打包成可跨專案安裝的 slash 命令與子代理：裝上任何專案後，主 session 只負責理解需求、拆單、驗收、交班；機械性的偵察／實作／難活分別派給三個模型釘選的子代理。
+**English** · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
-## 安裝
+A cross-project set of slash commands and subagents that package a simple idea: **the main session is your most expensive tokens, so it should only think — planning, breaking work down, verifying, and handing off — while mechanical reconnaissance, implementation, and heavy lifting go to three model-pinned subagents.** Install it on any project and your main session stops doing grunt work.
+
+> 🌐 **Works in your language.** The commands and subagents are authored in English for maintainability, but every one of them instructs Claude to *mirror your language*. Chat in Japanese and Claude plans, asks, and reports back in Japanese; chat in Traditional Chinese and it answers in Traditional Chinese. Englishifying the internals does **not** make the assistant English-only.
+
+## Install
+
+From the plugin marketplace (public repo):
 
 ```
-/plugin marketplace add /Users/tzuhsuan/code/claude-orchestration-plugin
+/plugin marketplace add letitia-chiu/claude-orchestration-plugin
 /plugin install orchestration@orchestration-marketplace
 ```
 
-開發時想直接試載（不經 marketplace 安裝流程）：
+To try it during development without the marketplace flow:
 
 ```
-claude --plugin-dir /Users/tzuhsuan/code/claude-orchestration-plugin
+claude --plugin-dir /path/to/claude-orchestration-plugin
 ```
 
-安裝後命令會以 plugin 名稱為前綴出現：`/orchestration:kickoff`、`/orchestration:dispatch`、`/orchestration:wrapup`、`/orchestration:init-playbook`。
+Once installed, the commands appear namespaced by the plugin: `/orchestration:kickoff`, `/orchestration:dispatch`, `/orchestration:wrapup`, `/orchestration:init-playbook`.
 
-## 三層架構
+## The three-tier architecture
 
 ```
-統籌（主 session，當下可用的最高智慧模型 + high effort）
-│  只做：理解需求、盲區/提問、拆單、派工、對抗式驗收、整合、交班
+Orchestrator (main session — the strongest available model + high effort)
+│  Only does: understand the request, blind-spot/questions, break work down,
+│  dispatch, adversarial verification, integration, handoff.
 │
-├─ scout    ＝Haiku 4.5   唯讀偵察（找檔/讀碼/彙整現況，只回結論，tools 鎖 Read/Glob/Grep）
-├─ worker   ＝Sonnet 5    預設執行（規格明確的實作/測試/批次改/文檔）
-└─ executor ＝Opus 4.6    難活執行（已規格化的大重構/精密修改，開工自報模型 ID 防跑錯階層）
+├─ scout    = Haiku 4.5   read-only reconnaissance (find files / read code / summarize
+│                          current state — returns conclusions only; tools locked to
+│                          Read/Glob/Grep)
+├─ worker   = Sonnet 5    default execution (well-specified implementation / tests /
+│                          batch edits / docs)
+└─ executor = Opus 4.6    hard execution (already-specified large refactors / precision
+                          edits — self-reports its model ID on the first line so you
+                          never silently run the wrong tier)
 ```
 
-四個 slash 命令對應工作流的四個階段：
+Four slash commands map to the four stages of the workflow:
 
-| 命令 | 作用 |
+| Command | What it does |
 |---|---|
-| `/orchestration:kickoff` | 開工儀式：盲區 pass → 提問 → 計畫（含派工切分） |
-| `/orchestration:dispatch` | 把任務轉成六欄派工單、派給對應階層 |
-| `/orchestration:wrapup` | 收尾儀式：驗證電池 → 舊坑檢查 → 交班 |
-| `/orchestration:init-playbook` | 在目標專案生成 `docs/playbook/` 骨架（已存在的檔案不覆蓋） |
+| `/orchestration:kickoff` | Kickoff ritual: blind-spot pass → questions → plan (including how to split the dispatch) |
+| `/orchestration:dispatch` | Turn a task into a six-field dispatch order and send it to the right tier |
+| `/orchestration:wrapup` | Wrap-up ritual: verification battery → known-failures check → handoff |
+| `/orchestration:init-playbook` | Generate the `docs/playbook/` skeleton in the target project (never overwrites existing files) |
 
-## 引擎 vs 血肉
+The cost intuition behind the tiers (API pricing ratio, subscription quota trends the same way): **Haiku : Sonnet : Opus ≈ 1 : 3 : 15.** Every token the orchestrator spends is the most expensive token in the system — so it delegates raw reading and mechanical edits downward and keeps only judgment for itself.
 
-這個 plugin 打包的是**引擎**：角色分工（scout/worker/executor 的模型釘選與職責邊界）、工作流程（開工/派工/收尾三儀式）、以及一份去專案化的 `orchestration.md` 通用版方法論。
+## The engine, not the domain knowledge
 
-它**不打包血肉**：任何專案的具體鐵律、踩過的坑、驗證電池的細節、交班格式的專屬慣例。這些屬於「這個專案自己長出來的東西」，硬塞進 plugin 只會變成過時的假設，裝到別的專案上反而添亂。
+This plugin ships the **engine**: the role split (scout/worker/executor — their model pinning and responsibility boundaries), the workflow (the kickoff / dispatch / wrap-up rituals), and one de-projectized, generic `orchestration.md` methodology.
 
-血肉的入口是 `/orchestration:init-playbook`：它在目標專案生成 `docs/playbook/` 的空骨架（含通用版 `orchestration.md`、一份中性的通用工程教訓種子當 `known-failures.md` 開頭，其餘檔案是待填欄位表），之後由該專案自己的開發過程逐條填滿。引擎可以到處裝，血肉只能在自己的專案裡養。
+It deliberately does **not** ship your project's domain knowledge: the hard rules of any specific codebase, the pitfalls it has hit, the details of its verification battery, its own handoff conventions. Those are things a project grows for itself; baked into a plugin they'd just become stale assumptions that get in the way on the next project.
 
-衍生自一個私人 Claude Code 專案裡實際運作的統籌工作流，蒸餾去除專屬脈絡後獨立成 plugin。
+The entry point for that domain knowledge is `/orchestration:init-playbook`: it generates an empty `docs/playbook/` skeleton in the target project (including the generic `orchestration.md`, a neutral seed of universal engineering lessons as the start of `known-failures.md`, and template files with fields to fill in), which that project then fills in one entry at a time through its own development. The engine installs anywhere; the domain knowledge can only be grown inside its own project.
+
+## Contributing
+
+Contributions — especially README translations and fixes — are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). The core rule: commands and agents are authored in English and **must keep their language-mirroring directive** so the assistant always talks to users in the users' own language.
 
 ## License
 
-TBD
+[MIT](LICENSE) © 2026 letitia-chiu
