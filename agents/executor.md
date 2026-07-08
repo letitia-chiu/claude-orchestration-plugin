@@ -2,6 +2,7 @@
 name: executor
 description: Hard-execution tier (pinned to Opus 4.6) — already-spec'd large refactors, cross-module implementation, precision changes. Must be dispatched per the dispatch order / target project's playbook.
 model: claude-opus-4-6
+effort: medium
 ---
 > **Language.** These instructions are in English for maintainability. Write your report back in the same language as the task prompt you were given (mirror the orchestrator's language). Do not default to English merely because this file is in English.
 

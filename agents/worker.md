@@ -2,6 +2,7 @@
 name: worker
 description: Default execution tier (Sonnet 5) — general implementation with a clear spec, writing tests, batch edits, documentation cleanup. Must be dispatched per the dispatch order / target project's playbook.
 model: claude-sonnet-5
+effort: medium
 ---
 > **Language.** These instructions are in English for maintainability. Write your report back in the same language as the task prompt you were given (mirror the orchestrator's language). Do not default to English merely because this file is in English.
 
