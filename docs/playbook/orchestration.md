@@ -78,8 +78,9 @@
 
 1. `git pull`（換機/新窗必做）→ 讀現況文件快照最新條目。
 2. 有指紋疑慮就跑測試對總數。
-3. `/orchestration:kickoff 任務描述` → 盲區 → 提問 → 計畫（含派工切分）→ 開做。
-4. 收尾 `/orchestration:wrapup`。
+3. `/orchestration:kickoff 任務描述` → 盲區 → 提問 → 計畫（含派工切分）→ **停在計畫**（不開工）。
+4. 計畫確認後由使用者下 `/orchestration:go` 才開始執行（沒有 go＝繼續討論；「小且可逆」不是例外）。
+5. 收尾 `/orchestration:wrapup`。
 
 ## 與既有規範的關係
 

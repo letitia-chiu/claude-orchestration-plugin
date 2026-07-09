@@ -21,7 +21,7 @@ To try it during development without the marketplace flow:
 claude --plugin-dir /path/to/claude-orchestration-plugin
 ```
 
-Once installed, the commands appear namespaced by the plugin: `/orchestration:kickoff`, `/orchestration:dispatch`, `/orchestration:wrapup`, `/orchestration:init-playbook`.
+Once installed, the commands appear namespaced by the plugin: `/orchestration:kickoff`, `/orchestration:go`, `/orchestration:dispatch`, `/orchestration:wrapup`, `/orchestration:init-playbook`.
 
 ## The three-tier architecture
 
@@ -40,11 +40,12 @@ Orchestrator (main session — the strongest available model + high effort)
                           never silently run the wrong tier)
 ```
 
-Four slash commands map to the four stages of the workflow:
+Five slash commands map to the stages of the workflow:
 
 | Command | What it does |
 |---|---|
-| `/orchestration:kickoff` | Kickoff ritual: blind-spot pass → questions → plan (including how to split the dispatch) |
+| `/orchestration:kickoff` | Kickoff ritual: blind-spot pass → questions → plan (including how to split the dispatch) — **stops at the plan, does not start work** |
+| `/orchestration:go` | Execution order: nothing is executed until the user fires this (the authorization is injected fresh at the moment of use, so it can't be diluted by long context) |
 | `/orchestration:dispatch` | Turn a task into a six-field dispatch order and send it to the right tier |
 | `/orchestration:wrapup` | Wrap-up ritual: verification battery → known-failures check → handoff |
 | `/orchestration:init-playbook` | Generate the `docs/playbook/` skeleton in the target project (never overwrites existing files) |

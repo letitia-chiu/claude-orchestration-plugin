@@ -21,7 +21,7 @@
 claude --plugin-dir /path/to/claude-orchestration-plugin
 ```
 
-インストール後、コマンドはプラグイン名で名前空間化されて表示されます: `/orchestration:kickoff`、`/orchestration:dispatch`、`/orchestration:wrapup`、`/orchestration:init-playbook`。
+インストール後、コマンドはプラグイン名で名前空間化されて表示されます: `/orchestration:kickoff`、`/orchestration:go`、`/orchestration:dispatch`、`/orchestration:wrapup`、`/orchestration:init-playbook`。
 
 ## 三層アーキテクチャ
 
@@ -40,11 +40,12 @@ Orchestrator（メインセッション — 利用可能な最強のモデル + 
                           誤って違う階層を動かしていることに気づかず進む心配がない）
 ```
 
-4つのスラッシュコマンドが、ワークフローの4つの段階に対応しています。
+5つのスラッシュコマンドが、ワークフローの各段階に対応しています。
 
 | コマンド | 内容 |
 |---|---|
-| `/orchestration:kickoff` | 開始儀式: 盲点の洗い出し → 質問 → 計画（ディスパッチの分割方法を含む） |
+| `/orchestration:kickoff` | 開始儀式: 盲点の洗い出し → 質問 → 計画（ディスパッチの分割方法を含む）——**計画で停止し、実行は開始しない** |
+| `/orchestration:go` | 実行指示: ユーザーがこのコマンドを出して初めて実行が始まる（許可は使用時に新しく注入されるため、長い対話でも薄まらない） |
 | `/orchestration:dispatch` | タスクを6項目からなる派工単（ディスパッチオーダー）に変換し、適切な階層へ送る |
 | `/orchestration:wrapup` | 締めの儀式: 検証バッテリー → 既知の失敗チェック → 引き継ぎ |
 | `/orchestration:init-playbook` | 対象プロジェクトに `docs/playbook/` の骨格を生成する（既存ファイルは上書きしない） |

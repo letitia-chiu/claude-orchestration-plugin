@@ -21,7 +21,7 @@
 claude --plugin-dir /path/to/claude-orchestration-plugin
 ```
 
-安装完成后，命令会以 plugin 命名空间的形式出现：`/orchestration:kickoff`、`/orchestration:dispatch`、`/orchestration:wrapup`、`/orchestration:init-playbook`。
+安装完成后，命令会以 plugin 命名空间的形式出现：`/orchestration:kickoff`、`/orchestration:go`、`/orchestration:dispatch`、`/orchestration:wrapup`、`/orchestration:init-playbook`。
 
 ## 三层架构
 
@@ -40,11 +40,12 @@ Orchestrator（主 session — 可用的最强模型 + 高投入）
                           不会误用错的层级）
 ```
 
-四个 slash command 对应工作流的四个阶段：
+五个 slash command 对应工作流的各阶段：
 
 | 命令 | 作用 |
 |---|---|
-| `/orchestration:kickoff` | 开工仪式：盲区排查 → 提问 → 制定计划（包括如何拆分派工） |
+| `/orchestration:kickoff` | 开工仪式：盲区排查 → 提问 → 制定计划（包括如何拆分派工）——**停在计划、不开工** |
+| `/orchestration:go` | 开工令：用户下达该命令才开始执行（授权在使用当下才注入，不会被长对话稀释） |
 | `/orchestration:dispatch` | 把任务转成六字段的派工单，发送给正确的层级 |
 | `/orchestration:wrapup` | 收尾仪式：验证清单 → 历史遗留问题检查 → 交接 |
 | `/orchestration:init-playbook` | 在目标项目生成 `docs/playbook/` 骨架（不会覆盖已有文件） |

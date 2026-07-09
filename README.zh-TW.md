@@ -21,7 +21,7 @@
 claude --plugin-dir /path/to/claude-orchestration-plugin
 ```
 
-安裝完成後，命令會以 plugin 命名空間出現：`/orchestration:kickoff`、`/orchestration:dispatch`、`/orchestration:wrapup`、`/orchestration:init-playbook`。
+安裝完成後，命令會以 plugin 命名空間出現：`/orchestration:kickoff`、`/orchestration:go`、`/orchestration:dispatch`、`/orchestration:wrapup`、`/orchestration:init-playbook`。
 
 ## 三層架構
 
@@ -40,11 +40,12 @@ Orchestrator (主 session — 可用的最強模型 + 高投入)
                           不會不小心用錯層級）
 ```
 
-四個 slash command 對應工作流的四個階段：
+五個 slash command 對應工作流的各階段：
 
 | 命令 | 作用 |
 |---|---|
-| `/orchestration:kickoff` | 開工儀式：盲區 pass → 提問 → 計畫（包含如何拆分派工） |
+| `/orchestration:kickoff` | 開工儀式：盲區 pass → 提問 → 計畫（包含如何拆分派工）——**停在計畫、不開工** |
+| `/orchestration:go` | 開工令：使用者下這個指令才開始執行（授權在使用當下才注入，不會被長對話稀釋） |
 | `/orchestration:dispatch` | 把任務轉成六欄位的派工單，送到正確的層級 |
 | `/orchestration:wrapup` | 收尾儀式：驗證電池 → 舊坑檢查 → 交班 |
 | `/orchestration:init-playbook` | 在目標專案生成 `docs/playbook/` 骨架（不會覆蓋既有檔案） |
