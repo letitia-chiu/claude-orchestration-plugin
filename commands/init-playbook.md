@@ -92,13 +92,13 @@ Generate skeleton files under `docs/playbook/` in the **current (target) project
 │
 ├─ scout    ＝Haiku 4.5   唯讀偵察（找檔/讀碼/彙整現況，只回結論）
 ├─ worker   ＝Sonnet 5    預設執行（規格明確的實作/測試/批次改/文檔）
-├─ executor ＝Opus 4.6    難活執行（已規格化的大重構/精密修改）
-├─ 外部模型覆核（若有）    交叉覆核為主＋可規格化實作
-└─ 驗證 lens 子代理        對抗式審查（review-rubric 方法）
+├─ executor ＝Opus 4.8    難活執行（已規格化的大重構/精密修改）
+├─ 外部模型覆核（若有）    交叉覆核為主（依風險分級：平衡型模型做日常覆核、旗艦留關卡）
+└─ 驗證 lens 子代理        對抗式審查（rubric 方法；中風險可下放 worker 階、高風險用統籌級）
 ```
 
 - 統籌模型：當下可用的最高智慧模型＋effort high。
-- 成本權重（API 定價比例，訂閱額度同方向）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15**。effort 預設：統籌 high、executor/worker medium、scout low。
+- 成本權重（API 定價比例，訂閱額度同方向）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15**。effort：統籌自選（/effort）；executor/worker＝medium（釘在 agents frontmatter）；scout（Haiku 4.5）不支援 effort 參數＝不設。
 - 執行者一律**開工第一行自報模型 ID**（釘選探針的指紋機制，防「以為派了便宜的、其實跑到貴的」）。
 
 ## 統籌五律
@@ -127,7 +127,7 @@ Generate skeleton files under `docs/playbook/` in the **current (target) project
 | 規格明確的實作/重構/測試撰寫/批次修改/文檔整理 | worker | 預設執行層；Sonnet 遵循指令佳 |
 | 已規格化但難（大重構、跨模組、精密度高） | executor | 難度值得高階模型，但規格仍由統籌給足 |
 | worker 覺得需要規格外決定 | 退回統籌 → 補規格或升 executor | 不讓執行層做判斷 |
-| 高風險變更的第二雙眼 | 外部模型覆核（若專案有委派範本則照其格式） | 跨模型視角；外部模型不可用＝lens 加倍（rubric 有明文） |
+| 高風險變更的第二雙眼 | 外部模型覆核（若專案有委派範本則照其格式；覆核模型依風險分級＝平衡型日常、旗艦關卡、輕量低風險） | 跨模型視角；外部模型不可用＝lens 加倍（rubric 有明文） |
 | 判斷/語氣/審美/小事 | 統籌自己 | 五律第 5 條 |
 
 ## 內部派工單格式（比外部委派工單輕，但六件缺一不可）
@@ -153,8 +153,9 @@ Generate skeleton files under `docs/playbook/` in the **current (target) project
 
 1. `git pull`（換機/新窗必做）→ 讀現況文件快照最新條目。
 2. 有指紋疑慮就跑測試對總數。
-3. `/orchestration:kickoff 任務描述` → 盲區 → 提問 → 計畫（含派工切分）→ 開做。
-4. 收尾 `/orchestration:wrapup`。
+3. `/orchestration:kickoff 任務描述` → 盲區 → 提問 → 計畫（含派工切分）→ **停在計畫**（不開工）。
+4. 計畫確認後由使用者下 `/orchestration:go` 才開始執行（沒有 go＝繼續討論；「小且可逆」不是例外）。
+5. 收尾 `/orchestration:wrapup`。
 
 ## 與既有規範的關係
 
@@ -279,22 +280,17 @@ Generate skeleton files under `docs/playbook/` in the **current (target) project
 8. 模型產出的格式永遠比 spec 鬆；parser 要容忍開頭變體，並測「解析失敗時外洩什麼」。
 9. 任何「自由 dict」設定欄位都是走私通道；逐鍵 schema、值型別鎖死。
 10. URL 會進 log；憑證不走 query string，要走就用短命票。
-11. Python sqlite3 的 with ≠ close；「偶發性全掛」先查資源洩漏。
-12. 掃描式背景迴圈必配 in-flight 標記，且標記要在入列瞬間、不是開始處理才標。
-13. 節流／冷卻／每日上限一律持久化；設計時直接問「重啟會怎樣」。
-14. schema-gated 的寫入路徑，每個新欄位都是三件套（schema＋normalize＋round-trip）；驗證走真入口、不走捷徑。
-15. 行動裝置 PWA 版面問題先在模擬器 standalone 重現再動手；「數字剛好對了」的 hack 會在別處爆。
-16. API 層型別照後端真回應寫；型別謊言的代價是整頁崩潰。
-17. 前端多層快取先分清改動落在哪層、用對應的重載儀式。
-18. flex 對齊怪＝先查 inline-block 基線；用截圖＋像素量測驗證，不靠目測。
-19. 跨模型協作要有「對到同一版」的握手信物（測試總數／commit hash）。
-20. 自動化工具會動你腳下的地；收工檢查分支是慣例不是偏執。
-21. 功能的終點是使用者實際能用，不是 merge；順口提的小需求當場落檔。
-22. 有參考碼＝逐屬性移植；交付前並排截圖自比，不像不交。
-23. 外部 API 以實測回應為準；寫 code 前先 curl 一發存證。
-24. 改動有調節器（moderator／clamp）的系統前，先讀清它的實際作用域；用「事前推算最終顯示值」做 guard。
-25. 便宜模型需要剛性輸出契約；parser 永遠假設對面會答非所問。
-26. 依賴模型自標的協定，都要有後端 backstop 接「它最自然的寫法」；範例文檔裡的寫法就是模型最會寫的寫法。
+11. 掃描式背景迴圈必配 in-flight 標記，且標記要在入列瞬間、不是開始處理才標。
+12. 節流／冷卻／每日上限一律持久化；設計時直接問「重啟會怎樣」。
+13. schema-gated 的寫入路徑，每個新欄位都是三件套（schema＋normalize＋round-trip）；驗證走真入口、不走捷徑。
+14. API 層型別照後端真回應寫；型別謊言的代價是整頁崩潰。
+15. 跨模型協作要有「對到同一版」的握手信物（測試總數／commit hash）。
+16. 自動化工具會動你腳下的地；收工檢查分支是慣例不是偏執。
+17. 功能的終點是使用者實際能用，不是 merge；順口提的小需求當場落檔。
+18. 外部 API 以實測回應為準；寫 code 前先 curl 一發存證。
+19. 改動有調節器（moderator／clamp）的系統前，先讀清它的實際作用域；用「事前推算最終顯示值」做 guard。
+20. 便宜模型需要剛性輸出契約；parser 永遠假設對面會答非所問。
+21. 依賴模型自標的協定，都要有後端 backstop 接「它最自然的寫法」；範例文檔裡的寫法就是模型最會寫的寫法。
 ```
 
 ---

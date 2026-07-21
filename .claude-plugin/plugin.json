@@ -2,7 +2,7 @@
   "name": "orchestration",
   "displayName": "Orchestration Workflow",
   "description": "A cross-project set of slash commands and subagents for an orchestrate-and-delegate workflow: the main session plans, breaks down, and dispatches work; layered subagents (scout / worker / executor) carry it out.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "author": {
     "name": "letitia-chiu"
   },

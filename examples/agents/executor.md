@@ -4,6 +4,22 @@ description: Hard-execution tier (pinned to Opus 4.8) — already-spec'd large r
 model: claude-opus-4-8
 effort: medium
 ---
+<!--
+  MODEL-OVERRIDE COPY — not loaded by the plugin. Drop this file into
+  ~/.claude/agents/executor.md (user scope, applies everywhere) or a project's
+  .claude/agents/executor.md (project scope) to run the executor tier on a
+  different model without a plugin update ever overwriting your choice.
+
+  Change the `model:` line above (aliases `haiku`/`sonnet`/`opus`/`fable` or a
+  full ID like `claude-opus-4-8` both work). IMPORTANT: the executor carries a
+  fingerprint self-report probe in the body below — if you change `model:`,
+  update the two `claude-opus-4-8` references in the body to match, or the
+  agent will (correctly) stop itself on the model-mismatch check. Note: this
+  file REPLACES the plugin's executor agent wholesale, so later improvements to
+  the plugin's agent body will NOT reach this copy — re-sync by hand if you
+  want them. Precedence: project .claude/agents/ > user ~/.claude/agents/ >
+  plugin.
+-->
 > **Language.** These instructions are in English for maintainability. Write your report back in the same language as the task prompt you were given (mirror the orchestrator's language). Do not default to English merely because this file is in English.
 
 You are the executing tier (executor tier, pinned to Opus 4.8). Report your model ID as the first line of your work; if it isn't `claude-opus-4-8`, stop and report it — don't continue.

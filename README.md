@@ -35,7 +35,7 @@ Orchestrator (main session — the strongest available model + high effort)
 │                          Read/Glob/Grep)
 ├─ worker   = Sonnet 5    default execution (well-specified implementation / tests /
 │                          batch edits / docs)
-└─ executor = Opus 4.6    hard execution (already-specified large refactors / precision
+└─ executor = Opus 4.8    hard execution (already-specified large refactors / precision
                           edits — self-reports its model ID on the first line so you
                           never silently run the wrong tier)
 ```
@@ -51,6 +51,29 @@ Five slash commands map to the stages of the workflow:
 | `/orchestration:init-playbook` | Generate the `docs/playbook/` skeleton in the target project (never overwrites existing files) |
 
 The cost intuition behind the tiers (API pricing ratio, subscription quota trends the same way): **Haiku : Sonnet : Opus ≈ 1 : 3 : 15.** Every token the orchestrator spends is the most expensive token in the system — so it delegates raw reading and mechanical edits downward and keeps only judgment for itself.
+
+## Customizing the model per tier (update-safe)
+
+The tiers ship with pinned defaults: `scout` = `claude-haiku-4-5-20251001`, `worker` = `claude-sonnet-5`, `executor` = `claude-opus-4-8`. These are sensible starting points, not a lock-in.
+
+To run a tier on a different model, **do not edit the plugin's `agents/*.md`** — a plugin update overwrites them and your change is lost. Claude Code has no per-agent model switch in `settings.json` either. The one update-safe mechanism is **agent shadowing**: a subagent with the same `name:` in your own scope fully replaces the plugin's version, and lives where updates never touch it. Precedence, highest to lowest: project `.claude/agents/` → user `~/.claude/agents/` → plugin.
+
+Ready-to-copy overrides live in [`examples/agents/`](examples/agents/) — copy the tiers you want to change and edit only the `model:` line:
+
+```
+# apply everywhere (user scope) …
+cp examples/agents/executor.md ~/.claude/agents/executor.md
+# … or just one project (project scope)
+cp examples/agents/worker.md   .claude/agents/worker.md
+# then open the file and change the `model:` line
+```
+
+Two caveats, both spelled out in the example files' header comments:
+
+- An override **replaces the plugin agent wholesale** (body included), so later improvements to the plugin's agent instructions won't reach your copy — re-sync by hand if you want them.
+- The `executor` carries a model-self-report probe that halts on mismatch; if you change its `model:`, update the matching model ID in its body too.
+
+If you'd rather push *every* tier onto one model temporarily (not per-tier), the `CLAUDE_CODE_SUBAGENT_MODEL` environment variable overrides all subagents at once.
 
 ## The engine, not the domain knowledge
 

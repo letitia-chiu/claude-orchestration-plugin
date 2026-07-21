@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0] - 2026-07-21
+
+### Changed
+
+- `executor` tier default bumped to **Opus 4.8** (`claude-opus-4-8`) — was Opus 4.6. Updated everywhere the tier is labeled or fingerprint-probed: `agents/executor.md` (frontmatter `model:` + the self-report halt check), all four READMEs, `docs/playbook/orchestration.md`, and the embedded playbook in `commands/init-playbook.md`. `scout` (Haiku 4.5) and `worker` (Sonnet 5) defaults unchanged.
+- Re-synced the `orchestration.md` embedded in `commands/init-playbook.md` (File 2/10) to the current root `docs/playbook/orchestration.md` — it had drifted behind on three prior releases: the 0.3.0 `go` gate in the boot ritual (kickoff now stops at the plan), the 0.3.1 risk-tiered external-review/lens wording, and the effort note (`scout` unset because Haiku 4.5 has no effort parameter, not "low"). The embed is what actually ships to target projects, so the stale copy meant new projects got the old methodology.
+- `universal-lessons.md` seed trimmed from 26 to 21 entries — removed the five that read as single-stack war-stories (Python sqlite3 `with`/close, mobile PWA layout, frontend multi-layer cache, flex/inline-block baseline, reference-code pixel-porting) to keep the seed genuinely cross-technology. Synced symmetrically across all three copies (root `universal-lessons.md`, the embed in `commands/init-playbook.md`, and this repo's own `docs/playbook/known-failures.md`).
+
+### Added
+
+- **Update-safe per-tier model customization.** The tiers still ship pinned defaults, but users can now override the model a tier runs on without a plugin update clobbering it, via same-name agent shadowing in `~/.claude/agents/` (user scope) or `.claude/agents/` (project scope). Ships ready-to-copy full overrides under `examples/agents/` (`scout.md` / `worker.md` / `executor.md`) and a "Customizing the model per tier (update-safe)" section in all four READMEs. (Claude Code has no per-agent `model:` switch in `settings.json`; the all-tiers-at-once `CLAUDE_CODE_SUBAGENT_MODEL` env var is documented as the coarse alternative.)
+
 ## [0.3.1] - 2026-07-09
 
 ### Changed

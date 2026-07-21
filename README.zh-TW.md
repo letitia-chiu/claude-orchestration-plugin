@@ -35,7 +35,7 @@ Orchestrator (主 session — 可用的最強模型 + 高投入)
 │                          Read/Glob/Grep）
 ├─ worker   = Sonnet 5    預設執行（規格明確的實作／測試／
 │                          批次修改／文件）
-└─ executor = Opus 4.6    難活執行（已規格化的大型重構／精密
+└─ executor = Opus 4.8    難活執行（已規格化的大型重構／精密
                           修改——第一行自報模型 ID，讓你
                           不會不小心用錯層級）
 ```
@@ -51,6 +51,29 @@ Orchestrator (主 session — 可用的最強模型 + 高投入)
 | `/orchestration:init-playbook` | 在目標專案生成 `docs/playbook/` 骨架（不會覆蓋既有檔案） |
 
 各層級背後的成本直覺（API 定價比例，訂閱制的額度消耗趨勢相同）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15。** Orchestrator 花的每一個 token 都是系統裡最貴的 token——所以它把單純的閱讀與機械性修改往下派，自己只保留判斷力。
+
+## 依層級自訂模型（不怕更新覆蓋）
+
+各層級出貨時釘了預設值：`scout` = `claude-haiku-4-5-20251001`、`worker` = `claude-sonnet-5`、`executor` = `claude-opus-4-8`。這是合理的起點，不是鎖死。
+
+想讓某一層跑別的模型，**別去改 plugin 的 `agents/*.md`**——plugin 一更新就會被覆蓋，你的改動就沒了。Claude Code 的 `settings.json` 也沒有「per-agent 指定模型」的開關。唯一不怕更新的機制是**同名覆蓋（agent shadowing）**：在你自己的 scope 放一個同 `name:` 的子代理，就會整份取代 plugin 版本，而且放在更新永遠碰不到的地方。優先序由高到低：專案 `.claude/agents/` → 使用者 `~/.claude/agents/` → plugin。
+
+可直接複製的覆蓋檔放在 [`examples/agents/`](examples/agents/)——挑你要改的層複製過去，只改 `model:` 那一行：
+
+```
+# 全域套用（使用者 scope）……
+cp examples/agents/executor.md ~/.claude/agents/executor.md
+# ……或只套用單一專案（專案 scope）
+cp examples/agents/worker.md   .claude/agents/worker.md
+# 接著打開檔案，改 `model:` 那一行
+```
+
+兩個注意事項，範例檔開頭的註解也都寫了：
+
+- 覆蓋是**整份取代 plugin 的 agent**（連本體一起），所以 plugin 之後對 agent 指令的改進不會流到你的拷貝——要的話請手動同步。
+- `executor` 帶了「開工自報模型 ID、不符就停」的指紋探針；改它的 `model:` 時，記得把本體裡對應的 model ID 一起改，否則會被自己的檢查擋下。
+
+若你只是想暫時把**所有層**一次壓到同一個模型（非依層級），可用環境變數 `CLAUDE_CODE_SUBAGENT_MODEL` 一次覆蓋所有子代理。
 
 ## 引擎，而非領域知識
 
