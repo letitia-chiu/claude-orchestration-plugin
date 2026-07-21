@@ -1,12 +1,12 @@
 {
   "name": "orchestration",
   "displayName": "Orchestration Workflow",
-  "description": "A cross-project set of slash commands and subagents for an orchestrate-and-delegate workflow: the main session plans, breaks down, and dispatches work; layered subagents (scout / worker / executor) carry it out.",
-  "version": "0.4.0",
+  "description": "A cross-project set of slash commands, subagents, and audit skills for an orchestrate-and-delegate workflow: the main session plans, generalizes findings, assigns invariant ownership, and verifies; layered subagents carry out bounded work.",
+  "version": "0.5.0",
   "author": {
     "name": "letitia-chiu"
   },
-  "keywords": ["orchestration", "subagents", "workflow"],
+  "keywords": ["orchestration", "subagents", "workflow", "runtime-contracts"],
   "license": "MIT",
   "repository": "https://github.com/letitia-chiu/claude-orchestration-plugin",
   "homepage": "https://github.com/letitia-chiu/claude-orchestration-plugin#readme"
