@@ -18,7 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `/orchestration:dispatch` now generalizes findings before delegation, prevents parallel workers from sharing one invariant, and treats a green test count as only one evidence layer.
 - `worker` and `executor` now distinguish product-scope expansion from required same-class closure, invoke the Python contract Skill when applicable, and stop when a defect family repeats.
 - `/orchestration:wrapup` now requires closure records and adversarial plus valid-path spot checks for high-risk boundaries.
-- `docs/playbook/orchestration.md` expanded from role routing into a complete finding-generalization, invariant-ownership, evidence, and review-loop methodology.
+- `docs/playbook/orchestration.md` expanded from role routing into a complete finding-generalization, invariant-ownership, evidence, and review-loop methodology, while retaining the v0.3.0–v0.4.0 hard rules (go-gate "small and reversible is not an exception" clause, effort pinning details, review-model risk tiers, lens-doubling fallback, language-law drift warning).
+- `/orchestration:init-playbook` embedded `orchestration.md` / `README.md` templates synchronized with the new methodology, so newly initialized projects get the same rules.
 - Update-safe agent override examples synchronized with the new execution discipline.
 
 ## [0.4.0] - 2026-07-21

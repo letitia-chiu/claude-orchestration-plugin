@@ -16,7 +16,7 @@
 | 時機 | 讀什麼 |
 |---|---|
 | 開工（非瑣碎＝預估 ≥15 分鐘**或碰行為/資料**） | `unknowns-interview.md`（盲區自答＋提問門檻）＋`architecture-constraints.md` §鐵律 |
-| 統籌窗運作（派工/分層/成本） | `orchestration.md`（統籌五律＋派工單格式＋判準表；SOP 命令＝`/orchestration:kickoff` `/orchestration:dispatch` `/orchestration:wrapup`） |
+| 統籌窗運作（派工/分層/成本） | `orchestration.md`（統籌七律＋八件派工單格式＋判準表；SOP 命令＝`/orchestration:kickoff` `/orchestration:dispatch` `/orchestration:wrapup`） |
 | 設計新功能 | `architecture-constraints.md` 全文＋`known-failures.md` §架構級 |
 | 動手寫 code 前後 | `review-rubric.md`（風險分級＋驗證電池決策表） |
 | 修 bug | `debug-playbook.md`（症狀速查）→ `known-failures.md`（別踩回舊坑）；動手修之前補跑盲區 pass |

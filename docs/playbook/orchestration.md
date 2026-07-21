@@ -23,8 +23,8 @@
 ```
 
 - 統籌模型：當下可用的最高智慧模型＋effort high。
-- 成本權重直覺：Haiku : Sonnet : Opus 約 1 : 3 : 15。
-- 執行者第一行自報 model ID；高風險外部覆核另驗 model＋effort。
+- 成本權重（API 定價比例，訂閱額度同方向）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15**。effort：統籌自選（/effort）；executor/worker＝medium（釘在 agents frontmatter）；scout（Haiku 4.5）不支援 effort 參數＝不設。
+- 執行者一律**開工第一行自報模型 ID**（釘選探針的指紋機制，防「以為派了便宜的、其實跑到貴的」）；高風險外部覆核另驗 model＋effort。
 
 ## 統籌七律
 
@@ -36,9 +36,15 @@
 6. **驗收在統籌**：執行者回報是線索，不是證據；高風險工作統籌至少親驗一個反例＋一個合法路徑。
 7. **同族問題重現就停迴圈**：fresh-context 外部覆核後若同一 defect family 再出現，不再發下一張逐點修補單；重開 family inventory 或更換 owner／方法。
 
-## 語言律
+## 語言律（貫穿全程，凌駕形式）
 
-統籌對使用者的每次對話都鏡射使用者語言。命令、程式碼、frontmatter 可維持專案基準語言；人類可見的說明與回報跟著使用者走。
+統籌對使用者的**每一次**對話、提問、進度、回報，一律**鏡射使用者當下的語言**——講繁中回繁中、講日文回日文、講英文回英文。
+
+分清兩層、別混：
+- **產出物內容**（檔名、程式碼、frontmatter 值、刻意以英文為基準的命令／agent 腳本）維持原文。
+- **你對使用者說的話**（結論、標題、分段、提問）跟著使用者走。
+
+命令／agent 腳本英文化，只是「給模型讀的指令」用英文，不是你的輸出語言。長 session 尤其容易漂成英文——這是明確失敗模式，收尾回報時務必自檢。
 
 ## 派誰
 
@@ -47,7 +53,7 @@
 | 現況／檔案／surface 盤點 | scout | 唯讀；回傳結論＋證據，不貼大段原文 |
 | 規格明確、邊界獨立的實作 | worker | 不得與其他 agent 共用同一 invariant owner |
 | 已規格化但難、跨模組契約、精密重構 | executor | production＋共用 validator＋inventory＋boundary tests 同一 context |
-| 高風險第二雙眼 | 外部模型 | fresh context、只審不改、凍結候選集合 |
+| 高風險第二雙眼 | 外部模型 | fresh context、只審不改、凍結候選集合；覆核模型依風險分級（平衡型日常／旗艦關卡／輕量低風險；專案有委派範本則照其格式）；外部模型不可用＝lens 加倍（rubric 有明文） |
 | 判斷／語氣／審美／小事 | 統籌自己 | 派工成本高於自做 |
 
 ## finding 泛化規則
@@ -139,10 +145,10 @@ Explicit exclusions:
 
 ## 新統籌窗開機儀式
 
-1. 同步 repo，讀最新 handoff。
+1. `git pull`（換機／新窗必做）→ 讀最新 handoff。
 2. 有指紋疑慮就跑 gate 對總數／hash。
-3. `/orchestration:kickoff`：盲區→提問→計畫→派工切分→停。
-4. 使用者 `/orchestration:go` 後才執行。
+3. `/orchestration:kickoff`：盲區→提問→計畫→派工切分→**停在計畫**（不開工）。
+4. 計畫確認後由使用者下 `/orchestration:go` 才開始執行（沒有 go＝繼續討論；「小且可逆」不是例外）。
 5. 收尾 `/orchestration:wrapup`。
 
 ## 與專案規範的關係
