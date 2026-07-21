@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.0] - 2026-07-21
+
+### Added
+
+- `python-runtime-contract-audit` Skill for high-risk Python contract surfaces: dataclasses, `frozen=True`, Protocols/callbacks, exact booleans, enum discriminators, immutable containers, nested payloads, persistence/evidence/identity boundaries, and defect-family closure.
+- Explicit **Invariant owner** and **Defect-class closure** sections in dispatch orders.
+- Four-layer acceptance evidence for high-risk work: inventory coverage, defect-class closure, adversarial/mutation probes, and valid-path/full-suite regression.
+- Review-loop stop rule: a repeated same-family finding reopens the whole family inventory; after fresh-context repetition, stop line-item repair loops and escalate method or ownership.
+
+### Changed
+
+- `/orchestration:dispatch` now generalizes findings before delegation, prevents parallel workers from sharing one invariant, and treats a green test count as only one evidence layer.
+- `worker` and `executor` now distinguish product-scope expansion from required same-class closure, invoke the Python contract Skill when applicable, and stop when a defect family repeats.
+- `/orchestration:wrapup` now requires closure records and adversarial plus valid-path spot checks for high-risk boundaries.
+- `docs/playbook/orchestration.md` expanded from role routing into a complete finding-generalization, invariant-ownership, evidence, and review-loop methodology.
+- Update-safe agent override examples synchronized with the new execution discipline.
+
 ## [0.4.0] - 2026-07-21
 
 ### Changed
