@@ -2,8 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/letitia-chiu/claude-orchestration-plugin/main/examples/schemas/orchestration-result.schema.json",
   "title": "Orchestration external-agent result",
-  "description": "Common result envelope for feasibility_verifier / implementer / adversarial_reviewer runs. This file is the schema contract only; the mechanical validator and runner are delivered by a later batch of the orchestration codex enablement work package. An item that lacks violated_requirement or repository_evidence is not a valid finding and must be returned as an observation or evidence gap instead.",
+  "description": "Fixed result envelope for feasibility_verifier / implementer / adversarial_reviewer runs. This is the single canonical schema and it is written in the strict structured-output subset (every object declares additionalProperties: false and requires every property; no conditional keywords) so it can be passed verbatim to provider transports. Every role emits the same envelope: non-reviewer roles set findings/observations/suggestions/evidence_gaps to empty lists. Nullable scalars use the single representation type [string, null]. Role-specific semantic rules (three feasibility verdicts, empty changed_files for read-only roles, seven mandatory finding fields, Blocker/Major/Minor severity, empty reviewer collections for non-reviewer roles) are mechanically enforced by the runner's post-validation; an invalid result is classified INVALID_OUTPUT.",
   "type": "object",
+  "additionalProperties": false,
   "required": [
     "schema_version",
     "role",
@@ -17,19 +18,27 @@
     "session_id",
     "changed_files",
     "tests",
-    "repository_state"
+    "repository_state",
+    "findings",
+    "observations",
+    "suggestions",
+    "evidence_gaps"
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "type": "integer",
+      "enum": [1]
     },
     "role": {
+      "type": "string",
       "enum": ["feasibility_verifier", "implementer", "adversarial_reviewer"]
     },
     "provider": {
+      "type": "string",
       "enum": ["claude_subagent", "codex_cli", "claude_cli"]
     },
     "profile": {
+      "type": "string",
       "enum": [
         "codex_read_only",
         "codex_workspace_write",
@@ -41,23 +50,19 @@
     },
     "model": {
       "type": "string",
-      "minLength": 1,
-      "description": "Exact model ID the run executed with, as self-reported and as configured in the invocation."
+      "description": "Exact model ID the run executed with."
     },
     "verdict": {
       "type": "string",
-      "minLength": 1,
-      "description": "Role-specific verdict. feasibility_verifier is restricted to the three feasibility verdicts (see allOf)."
+      "description": "Role-specific verdict. feasibility_verifier must use one of PASS_FOR_IMPLEMENTATION_AUTHORIZATION / PLAN_CHANGE_REQUIRED / EVIDENCE_INSUFFICIENT (enforced by runner post-validation)."
     },
     "summary": {
-      "type": "string",
-      "minLength": 1
+      "type": "string"
     },
     "evidence": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "type": "string"
       },
       "description": "file:line / command-output references backing the verdict."
     },
@@ -71,33 +76,70 @@
     "changed_files": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "type": "string"
       },
-      "description": "Repo-relative paths changed by the run. Must be empty for read-only roles (see allOf)."
+      "description": "Repo-relative paths changed by the run. Must be empty for read-only roles (runner-enforced)."
     },
     "tests": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": ["command", "status"],
-        "properties": {
-          "command": {
-            "type": "string",
-            "minLength": 1
-          },
-          "status": {
-            "enum": ["passed", "failed", "skipped"]
-          },
-          "output_digest": {
-            "type": "string",
-            "description": "Optional fingerprint (e.g. trailing lines or hash) of the actual output."
-          }
+        "$ref": "#/$defs/test_entry"
+      }
+    },
+    "repository_state": {
+      "$ref": "#/$defs/repository_state"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      },
+      "description": "adversarial_reviewer only; other roles must send []. Candidate findings; only the final adjudicator (ChatGPT) may classify a candidate finding as established."
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "adversarial_reviewer only; other roles must send []. Notes that do not meet the evidence bar for a finding."
+    },
+    "suggestions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "adversarial_reviewer only; other roles must send []. Style preferences and optional improvements. Never findings."
+    },
+    "evidence_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "adversarial_reviewer only; other roles must send []. Claims that could not be verified with the provided packet."
+    }
+  },
+  "$defs": {
+    "test_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "status", "output_digest"],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "skipped"]
+        },
+        "output_digest": {
+          "type": ["string", "null"],
+          "description": "Optional fingerprint (e.g. trailing lines or hash) of the actual output; null when not supplied."
         }
       }
     },
     "repository_state": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["pre", "post"],
       "properties": {
         "pre": {
@@ -108,96 +150,13 @@
         }
       }
     },
-    "findings": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/finding"
-      },
-      "description": "adversarial_reviewer only. Candidate findings; only the final adjudicator (ChatGPT) may classify a candidate finding as established."
-    },
-    "observations": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
-      "description": "adversarial_reviewer only. Notes that do not meet the evidence bar for a finding."
-    },
-    "suggestions": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
-      "description": "adversarial_reviewer only. Style preferences and optional improvements. Never findings."
-    },
-    "evidence_gaps": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
-      "description": "adversarial_reviewer only. Claims that could not be verified with the provided packet."
-    }
-  },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "role": {
-            "const": "adversarial_reviewer"
-          }
-        }
-      },
-      "then": {
-        "required": ["findings", "observations", "suggestions", "evidence_gaps"]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "role": {
-            "const": "feasibility_verifier"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "verdict": {
-            "enum": [
-              "PASS_FOR_IMPLEMENTATION_AUTHORIZATION",
-              "PLAN_CHANGE_REQUIRED",
-              "EVIDENCE_INSUFFICIENT"
-            ]
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "role": {
-            "enum": ["feasibility_verifier", "adversarial_reviewer"]
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "changed_files": {
-            "maxItems": 0
-          }
-        }
-      }
-    }
-  ],
-  "$defs": {
     "git_state": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["head_sha", "status_short"],
       "properties": {
         "head_sha": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{7,40}$"
+          "type": "string"
         },
         "status_short": {
           "type": "string",
@@ -207,7 +166,8 @@
     },
     "finding": {
       "type": "object",
-      "description": "A candidate finding. All seven fields are mandatory; an item missing violated_requirement or repository_evidence fails validation and may only be reported as an observation or evidence gap.",
+      "additionalProperties": false,
+      "description": "A candidate finding. All seven fields are mandatory; an item missing violated_requirement or repository_evidence fails runner post-validation and may only be reported as an observation or evidence gap.",
       "required": [
         "id",
         "severity",
@@ -219,31 +179,26 @@
       ],
       "properties": {
         "id": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "severity": {
+          "type": "string",
           "enum": ["Blocker", "Major", "Minor"]
         },
         "violated_requirement": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "location": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "repository_evidence": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "impact": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "minimal_remediation_scope": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         }
       }
     }

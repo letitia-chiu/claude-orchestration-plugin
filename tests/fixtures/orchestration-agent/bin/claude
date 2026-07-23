@@ -39,6 +39,17 @@ def main():
     argv_file = os.environ.get("FAKE_ARGV_FILE")
     if argv_file:
         Path(argv_file).write_text(json.dumps(argv), encoding="utf-8")
+    # Real Claude Code 2.1.191 local contract: --print with stream-json output
+    # refuses to start without --verbose. Mirror it so a regression that drops
+    # --verbose from the runner argv fails these tests deterministically.
+    if "-p" in argv and "--output-format" in argv:
+        output_format = argv[argv.index("--output-format") + 1]
+        if output_format == "stream-json" and "--verbose" not in argv:
+            print(
+                "Error: When using --print, --output-format=stream-json requires --verbose",
+                file=sys.stderr,
+            )
+            return 1
     prompt = "" if sys.stdin.isatty() else sys.stdin.read()
     stdin_file = os.environ.get("FAKE_STDIN_FILE")
     if stdin_file:

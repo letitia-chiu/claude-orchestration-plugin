@@ -95,8 +95,27 @@ ENVELOPE_REQUIRED = (
     "changed_files",
     "tests",
     "repository_state",
+    "findings",
+    "observations",
+    "suggestions",
+    "evidence_gaps",
 )
 REVIEWER_COLLECTIONS = ("findings", "observations", "suggestions", "evidence_gaps")
+
+# Keywords the strict structured-output transport does not reliably support.
+# The canonical schema must stay inside the strict subset; the local preflight
+# fails closed before any provider is spawned.
+STRICT_FORBIDDEN_KEYWORDS = frozenset(
+    {
+        "if",
+        "then",
+        "else",
+        "allOf",
+        "dependentSchemas",
+        "unevaluatedProperties",
+        "patternProperties",
+    }
+)
 FINDING_REQUIRED = (
     "id",
     "severity",
@@ -205,6 +224,65 @@ def _snapshot_differences(pre, post):
 # ---------------------------------------------------------------------------
 # Routing validation (fail closed)
 # ---------------------------------------------------------------------------
+
+
+def preflight_strict_schema(schema):
+    """Fail-closed local validation that the schema stays in the strict subset.
+
+    Checks, before any provider is spawned: root is an object schema; every
+    object node declares additionalProperties: false and requires every one
+    of its properties; no forbidden conditional/unsupported keywords appear
+    anywhere; every $ref resolves inside this document. Returns a list of
+    errors (empty when the schema is strict-compatible).
+    """
+    errors = []
+    if not isinstance(schema, dict):
+        return ["schema root must be a JSON object"]
+    if schema.get("type") != "object":
+        errors.append("schema root type must be 'object'")
+
+    def resolve_ref(ref, location):
+        if not isinstance(ref, str) or not ref.startswith("#/"):
+            errors.append("%s: unresolvable $ref %r" % (location, ref))
+            return
+        node = schema
+        for part in ref[2:].split("/"):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                errors.append("%s: unresolvable $ref %r" % (location, ref))
+                return
+
+    def walk(node, location):
+        if isinstance(node, dict):
+            forbidden = STRICT_FORBIDDEN_KEYWORDS.intersection(node)
+            if forbidden:
+                errors.append(
+                    "%s: forbidden strict-subset keywords %s" % (location, sorted(forbidden))
+                )
+            if "$ref" in node:
+                resolve_ref(node["$ref"], location)
+            if node.get("type") == "object" or "properties" in node:
+                properties = node.get("properties")
+                if not isinstance(properties, dict):
+                    errors.append("%s: object schema without a properties map" % location)
+                else:
+                    if node.get("additionalProperties") is not False:
+                        errors.append(
+                            "%s: additionalProperties must be explicitly false" % location
+                        )
+                    if set(node.get("required", [])) != set(properties):
+                        errors.append(
+                            "%s: required must list every property name" % location
+                        )
+            for key, value in node.items():
+                walk(value, "%s.%s" % (location, key))
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, "%s[%d]" % (location, index))
+
+    walk(schema, "$")
+    return errors
 
 
 def load_routing(path):
@@ -343,6 +421,7 @@ def build_provider_command(provider, profile, model, workdir, artifact_dir):
         argv = [
             "claude",
             "-p",
+            "--verbose",
             "--model",
             model,
             "--permission-mode",
@@ -485,8 +564,12 @@ def _extract_claude_result(stdout_path):
     return None, "result event carries no structured output object"
 
 
-def validate_result(result, role, provider, profile):
-    """Standard-library validation aligned with the Batch 1 result schema."""
+def validate_result(result, role, provider, profile, model):
+    """Standard-library validation of the fixed result envelope.
+
+    The transport schema is the strict-subset canonical schema; the
+    role-specific semantics removed from the schema are enforced here.
+    """
     errors = []
     if not isinstance(result, dict):
         return ["final result is not a JSON object"]
@@ -497,7 +580,12 @@ def validate_result(result, role, provider, profile):
         return errors
     if result["schema_version"] != 1:
         errors.append("schema_version must be 1")
-    for field, expected in (("role", role), ("provider", provider), ("profile", profile)):
+    for field, expected in (
+        ("role", role),
+        ("provider", provider),
+        ("profile", profile),
+        ("model", model),
+    ):
         if result[field] != expected:
             errors.append(
                 "%s mismatch: invocation=%s result=%r" % (field, expected, result[field])
@@ -519,6 +607,19 @@ def validate_result(result, role, provider, profile):
         errors.append("changed_files must be a list of strings")
     if not isinstance(result["tests"], list):
         errors.append("tests must be a list")
+    else:
+        for index, entry in enumerate(result["tests"]):
+            if not isinstance(entry, dict):
+                errors.append("tests[%d] must be an object" % index)
+                continue
+            if not isinstance(entry.get("command"), str) or not entry.get("command"):
+                errors.append("tests[%d].command must be a non-empty string" % index)
+            if entry.get("status") not in {"passed", "failed", "skipped"}:
+                errors.append("tests[%d].status must be passed/failed/skipped" % index)
+            if "output_digest" not in entry or not (
+                entry["output_digest"] is None or isinstance(entry["output_digest"], str)
+            ):
+                errors.append("tests[%d].output_digest must be a string or null" % index)
     state = result["repository_state"]
     if not isinstance(state, dict) or not isinstance(state.get("pre"), dict) or not isinstance(
         state.get("post"), dict
@@ -528,11 +629,18 @@ def validate_result(result, role, provider, profile):
         errors.append("feasibility verdict must be one of %s" % sorted(FEASIBILITY_VERDICTS))
     if role in READ_ONLY_ROLES and result["changed_files"]:
         errors.append("read-only role must report an empty changed_files list")
+    for field in REVIEWER_COLLECTIONS:
+        if not isinstance(result[field], list):
+            errors.append("%s must be a list" % field)
     if role == "adversarial_reviewer":
-        for field in REVIEWER_COLLECTIONS:
-            if not isinstance(result.get(field), list):
-                errors.append("reviewer result must include list field: %s" % field)
-        for index, finding in enumerate(result.get("findings") or []):
+        for field in ("observations", "suggestions", "evidence_gaps"):
+            if isinstance(result[field], list) and any(
+                not isinstance(item, str) for item in result[field]
+            ):
+                errors.append("%s must be a list of strings" % field)
+        for index, finding in enumerate(
+            result["findings"] if isinstance(result["findings"], list) else []
+        ):
             if not isinstance(finding, dict):
                 errors.append("findings[%d] must be an object" % index)
                 continue
@@ -546,6 +654,12 @@ def validate_result(result, role, provider, profile):
             if severity is not None and severity not in SEVERITIES:
                 errors.append(
                     "findings[%d] severity must be one of %s" % (index, sorted(SEVERITIES))
+                )
+    else:
+        for field in REVIEWER_COLLECTIONS:
+            if isinstance(result[field], list) and result[field]:
+                errors.append(
+                    "non-reviewer role must report an empty %s list" % field
                 )
     return errors
 
@@ -724,6 +838,16 @@ def cmd_run(args):
             artifact_dir.mkdir(parents=True)
         if not RESULT_SCHEMA_FILE.is_file():
             raise ConfigError("result schema file missing: %s" % RESULT_SCHEMA_FILE)
+        try:
+            schema_doc = json.loads(RESULT_SCHEMA_FILE.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise ConfigError("result schema is not valid JSON: %s" % exc) from exc
+        schema_errors = preflight_strict_schema(schema_doc)
+        if schema_errors:
+            # Fail closed before any provider spawn: no quota is consumed.
+            raise ConfigError(
+                "schema strict-subset preflight failed: " + "; ".join(schema_errors)
+            )
 
         routing = load_routing(args.routing_file)
         routing_errors = validate_routing(routing)
@@ -898,7 +1022,7 @@ def cmd_run(args):
         )
     if result is None:
         return finish(INVALID_OUTPUT, result_error or "final structured result missing")
-    validation_errors = validate_result(result, args.role, provider, profile)
+    validation_errors = validate_result(result, args.role, provider, profile, args.model)
     if validation_errors:
         return finish(INVALID_OUTPUT, "result validation failed: " + "; ".join(validation_errors))
     outcome = map_verdict_outcome(result)

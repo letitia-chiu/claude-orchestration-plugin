@@ -94,11 +94,13 @@ def make_result(role, provider, profile, **overrides):
             "pre": {"head_sha": "0" * 40, "status_short": ""},
             "post": {"head_sha": "0" * 40, "status_short": ""},
         },
+        # Fixed envelope: every role sends all four reviewer collections;
+        # non-reviewer roles must leave them empty.
+        "findings": [],
+        "observations": [],
+        "suggestions": [],
+        "evidence_gaps": [],
     }
-    if role == "adversarial_reviewer":
-        result.update(
-            {"findings": [], "observations": [], "suggestions": [], "evidence_gaps": []}
-        )
     result.update(overrides)
     return result
 
@@ -465,6 +467,7 @@ class ProviderArgvTests(RunnerTestCase):
         self.assertEqual(rc, 0)
         argv = self.captured_argv()
         self.assertIn("-p", argv)
+        self.assertIn("--verbose", argv)
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "plan")
         self.assertEqual(argv[argv.index("--tools") + 1], "Read,Glob,Grep")
         self.assertEqual(
@@ -920,6 +923,194 @@ class StaticSafetyTests(unittest.TestCase):
 
         Visitor().visit(tree)
         self.assertEqual(git_literal_functions, {"_run_git"})
+
+
+# ---------------------------------------------------------------------------
+# Corrective C1 — real-CLI contract closure (RC-1 schema transport, RC-2 argv)
+# ---------------------------------------------------------------------------
+
+
+class StrictSchemaContractTests(unittest.TestCase):
+    """RC-1: the canonical schema must stay in the strict transport subset."""
+
+    SCHEMA = json.loads(
+        (PLUGIN_ROOT / "examples" / "schemas" / "orchestration-result.schema.json")
+        .read_text(encoding="utf-8")
+    )
+
+    FORBIDDEN = {
+        "if",
+        "then",
+        "else",
+        "allOf",
+        "dependentSchemas",
+        "unevaluatedProperties",
+        "patternProperties",
+    }
+
+    def walk_objects(self, node, location="$"):
+        if isinstance(node, dict):
+            yield location, node
+            for key, value in node.items():
+                yield from self.walk_objects(value, "%s.%s" % (location, key))
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                yield from self.walk_objects(value, "%s[%d]" % (location, index))
+
+    def test_every_object_declares_strict_contract(self):
+        object_nodes = 0
+        for location, node in self.walk_objects(self.SCHEMA):
+            if node.get("type") == "object" or "properties" in node:
+                object_nodes += 1
+                self.assertIs(node.get("additionalProperties"), False, location)
+                self.assertEqual(
+                    set(node.get("required", [])), set(node["properties"]), location
+                )
+        self.assertGreaterEqual(object_nodes, 5)
+
+    def test_no_forbidden_conditional_keywords(self):
+        for location, node in self.walk_objects(self.SCHEMA):
+            self.assertFalse(self.FORBIDDEN.intersection(node), location)
+
+    def test_runner_preflight_accepts_canonical_schema(self):
+        self.assertEqual(oa.preflight_strict_schema(self.SCHEMA), [])
+
+
+class SchemaPreflightTests(RunnerTestCase):
+    """RC-1: preflight fails closed before any provider spawn."""
+
+    def run_with_schema(self, mutate):
+        schema = json.loads(
+            (PLUGIN_ROOT / "examples" / "schemas" / "orchestration-result.schema.json")
+            .read_text(encoding="utf-8")
+        )
+        mutate(schema)
+        bad_schema = self.tmp / "mutated-schema.json"
+        bad_schema.write_text(json.dumps(schema), encoding="utf-8")
+        argv_file = self.tmp / "captured-argv.json"
+        original = oa.RESULT_SCHEMA_FILE
+        oa.RESULT_SCHEMA_FILE = bad_schema
+        try:
+            rc, artifacts, _, _ = self.run_runner(
+                "feasibility_verifier",
+                extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+            )
+        finally:
+            oa.RESULT_SCHEMA_FILE = original
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("preflight", invocation["detail"])
+        # The fake provider must never have been spawned: no argv capture.
+        self.assertFalse(argv_file.exists(), "provider was spawned despite preflight failure")
+        return invocation
+
+    def test_missing_nested_additional_properties_fails_closed(self):
+        self.run_with_schema(
+            lambda schema: schema["$defs"]["finding"].pop("additionalProperties")
+        )
+
+    def test_incomplete_required_fails_closed(self):
+        def mutate(schema):
+            schema["required"].remove("verdict")
+
+        self.run_with_schema(mutate)
+
+    def test_conditional_keyword_fails_closed(self):
+        def mutate(schema):
+            schema["if"] = {"properties": {"role": {"const": "implementer"}}}
+            schema["then"] = {}
+
+        self.run_with_schema(mutate)
+
+    def test_unresolvable_ref_fails_closed(self):
+        def mutate(schema):
+            schema["properties"]["repository_state"] = {
+                "$ref": "#/$defs/does_not_exist"
+            }
+
+        self.run_with_schema(mutate)
+
+
+class FixedEnvelopeTests(RunnerTestCase):
+    """RC-1: every role emits the same envelope; semantics stay in the runner."""
+
+    def test_non_reviewer_missing_collections_is_invalid_output(self):
+        final = make_result("feasibility_verifier", "codex_cli", "codex_read_only")
+        del final["findings"]
+        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", final=final)
+        self.assertEqual(rc, 1)
+        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
+        self.assertIn("findings", invocation["detail"])
+
+    def test_non_reviewer_nonempty_collections_is_invalid_output(self):
+        final = make_result(
+            "implementer",
+            "codex_cli",
+            "codex_workspace_write",
+            suggestions=["sneaky reviewer-style note"],
+        )
+        rc, artifacts, _, _ = self.run_runner(
+            "implementer", allowed=("src/app.py",), final=final
+        )
+        self.assertEqual(rc, 1)
+        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
+        self.assertIn("suggestions", invocation["detail"])
+
+    def test_tests_entry_without_output_digest_is_invalid_output(self):
+        final = make_result(
+            "implementer",
+            "codex_cli",
+            "codex_workspace_write",
+            tests=[{"command": "python3 -m unittest", "status": "passed"}],
+        )
+        rc, artifacts, _, _ = self.run_runner(
+            "implementer", allowed=("src/app.py",), final=final
+        )
+        self.assertEqual(rc, 1)
+        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
+        self.assertIn("output_digest", invocation["detail"])
+
+    def test_model_mismatch_is_invalid_output(self):
+        final = make_result(
+            "feasibility_verifier",
+            "codex_cli",
+            "codex_read_only",
+            model="some-other-model",
+        )
+        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", final=final)
+        self.assertEqual(rc, 1)
+        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
+        self.assertIn("model mismatch", invocation["detail"])
+
+
+class ClaudeInvocationContractTests(RunnerTestCase):
+    """RC-2: stream-json with --print requires --verbose (real 2.1.191 contract)."""
+
+    def test_claude_argv_includes_verbose_with_stream_json(self):
+        rc, _, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            extra_env={"FAKE_ARGV_FILE": str(self.tmp / "captured-argv.json")},
+        )
+        self.assertEqual(rc, 0)
+        argv = json.loads(
+            (self.tmp / "captured-argv.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("--verbose", argv)
+        self.assertIn("-p", argv)
+        self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
+
+    def test_fake_claude_rejects_stream_json_without_verbose(self):
+        fake_claude = FAKE_BIN / "claude"
+        proc = subprocess.run(
+            [str(fake_claude), "-p", "--output-format", "stream-json"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn(
+            "--output-format=stream-json requires --verbose", proc.stderr
+        )
 
 
 if __name__ == "__main__":
