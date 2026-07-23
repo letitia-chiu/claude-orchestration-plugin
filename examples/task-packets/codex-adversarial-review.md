@@ -1,7 +1,6 @@
-# Task Packet — Claude Adversarial Review（`adversarial_reviewer`，codex_hosted）
+# Task Packet — Codex Adversarial Review（`adversarial_reviewer`，claude_hosted）
 
-> 用途：Codex-hosted implementation 完成後，經獨立 reviewer authorization，由 bounded runner 派 Claude CLI 以 fresh context、唯讀方式對候選變更做對抗式覆核。
-> 注意：Codex-host adapter 尚未實作（active-host 執行 fail closed）；本範本描述的 `claude_cli` reviewer transport 本身已存在且可測。
+> 用途：Claude-hosted implementation 完成後，經獨立 reviewer authorization，由 bounded runner 派 Codex CLI 以 fresh context、唯讀方式對候選變更做對抗式覆核。
 > `<...>` 佔位欄位由 packet 明示的 governance identity／統籌填入；「固定行為契約」不得由填單者覆寫或刪除。
 
 ## Common header（27 欄缺一不可）
@@ -13,14 +12,14 @@
 | Acceptance owner | `<驗收 owner>` |
 | Finding adjudicator | `<finding 裁定者；reviewer 本身永遠不是>` |
 | Final ratifier | `<最終批准者>` |
-| Host mode | codex_hosted（本範本固定；claude_hosted 的 reviewer 用 codex-adversarial-review packet） |
-| Active execution host | codex_desktop |
+| Host mode | claude_hosted（本範本固定；codex_hosted 的 reviewer 用 claude-adversarial-review packet） |
+| Active execution host | claude_code |
 | Host-local tier | not applicable（external reviewer 不屬於 host tier chain；result 的 host_tier 必須為 null） |
 | Host-local model | not applicable |
 | Invocation path | external_cli |
-| External reviewer provider/profile/model | claude_cli / claude_read_only / `<exact-model-id：依風險選對方 provider 的平衡／最高檔位，由本欄明示，不得自動升降級>` |
+| External reviewer provider/profile/model | codex_cli / codex_read_only / `<exact-model-id：依風險選對方 provider 的平衡／最高檔位，由本欄明示，不得自動升降級>` |
 | Role | adversarial_reviewer |
-| Provider/profile | claude_cli / claude_read_only（依目標專案 `docs/playbook/agent-routing.json` 的 codex_hosted.external_reviewer 解析） |
+| Provider/profile | codex_cli / codex_read_only（依目標專案 `docs/playbook/agent-routing.json` 的 claude_hosted.external_reviewer 解析） |
 | Explicit model | `<exact-model-id>` |
 | Repository/worktree | `<absolute-repo-path>`（唯讀；不得建立 branch／worktree） |
 | Authoritative plan branch | `<plan-branch>` |
@@ -33,7 +32,7 @@
 | Required evidence | `<審查輸入：complete delta、exclusions、evidence packet 路徑>` |
 | Stop conditions | `<本單特定停止條件>`；另固定：審查輸入不完整＝以 evidence gap 回報而非自行補齊 |
 | Git authorization | NONE（不得 branch、worktree、commit、push、PR、merge） |
-| External-side-effect authorization | ALLOW_PROVIDER_INVOCATION（僅此一次 Claude CLI 呼叫；不得 dispatch 其他 provider 或角色） |
+| External-side-effect authorization | ALLOW_PROVIDER_INVOCATION（僅此一次 Codex CLI 呼叫；不得 dispatch 其他 provider 或角色） |
 | Report schema | `examples/schemas/orchestration-result.schema.json`（schema v2 envelope，role=adversarial_reviewer，findings／observations／suggestions／evidence_gaps 分列） |
 
 ## 固定行為契約（不可覆寫）

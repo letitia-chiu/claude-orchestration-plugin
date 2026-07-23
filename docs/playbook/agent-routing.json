@@ -1,30 +1,83 @@
 {
-  "schema_version": 1,
-  "authority": {
-    "architecture_owner": "chatgpt",
-    "authoritative_plan_owner": "chatgpt",
-    "authorization_owner": "chatgpt",
-    "acceptance_owner": "chatgpt",
-    "final_adjudicator": "chatgpt"
+  "schema_version": 2,
+  "governance": {
+    "binding": "task_packet",
+    "explicit_identity_required": true,
+    "provider_agnostic": true
   },
-  "roles": {
-    "feasibility_verifier": {
-      "provider": "codex_cli",
-      "profile": "codex_read_only"
+  "host_modes": {
+    "claude_hosted": {
+      "active_host": "claude_code",
+      "adapter_status": "implemented",
+      "local_tiers": {
+        "scout": {
+          "provider": "claude_native",
+          "profile": "scout",
+          "model_override": null
+        },
+        "worker": {
+          "provider": "claude_native",
+          "profile": "worker",
+          "model_override": null
+        },
+        "executor": {
+          "provider": "claude_native",
+          "profile": "executor",
+          "model_override": null
+        }
+      },
+      "external_reviewer": {
+        "provider": "codex_cli",
+        "profile": "codex_read_only"
+      }
     },
-    "implementer": {
-      "provider": "codex_cli",
-      "profile": "codex_workspace_write"
-    },
-    "adversarial_reviewer": {
-      "provider": "claude_cli",
-      "profile": "claude_read_only"
+    "codex_hosted": {
+      "active_host": "codex_desktop",
+      "adapter_status": "not_implemented",
+      "local_tiers": {
+        "scout": {
+          "provider": "codex_native",
+          "profile": "pending_local_feasibility",
+          "model_override": null
+        },
+        "worker": {
+          "provider": "codex_native",
+          "profile": "pending_local_feasibility",
+          "model_override": null
+        },
+        "executor": {
+          "provider": "codex_native",
+          "profile": "pending_local_feasibility",
+          "model_override": null
+        }
+      },
+      "external_reviewer": {
+        "provider": "claude_cli",
+        "profile": "claude_read_only"
+      }
     }
   },
+  "role_bindings": {
+    "feasibility_verifier": "active_host_local_tier",
+    "implementer": "active_host_local_tier",
+    "adversarial_reviewer": "external_reviewer"
+  },
+  "headless_cli_implementation": {
+    "enabled_by_default": false,
+    "requires_separate_authorization": true,
+    "provider": "codex_cli",
+    "profile": "codex_workspace_write"
+  },
   "constraints": {
-    "require_distinct_implementer_and_reviewer_provider": true,
+    "one_active_host": true,
+    "tier_must_be_explicit": true,
+    "host_may_auto_dispatch_reviewer": false,
     "implementer_may_dispatch_reviewer": false,
     "reviewer_may_modify_repository": false,
-    "external_git_writes_require_separate_authorization": true
+    "reviewer_may_dispatch_host": false,
+    "external_git_writes_require_separate_authorization": true,
+    "automatic_fallback": false,
+    "automatic_retry": false,
+    "automatic_role_chaining": false
   }
 }

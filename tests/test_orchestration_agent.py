@@ -1,10 +1,16 @@
-"""Tests for the bounded external-agent runner.
+"""Tests for the bounded external-agent runner (dual-host contract).
 
 All provider invocations use the fake `codex`/`claude` executables in
 tests/fixtures/orchestration-agent/bin — no real provider, no network,
 no quota. Target repositories are built at test time by copying
 repo-template/ into a temporary directory and running `git init` there
 (feasibility finding F4: no nested .git is ever committed).
+
+Dual-host defaults exercised here:
+- adversarial_reviewer under claude_hosted -> codex_cli / codex_read_only
+- adversarial_reviewer under codex_hosted  -> claude_cli / claude_read_only
+- implementer via the opt-in headless_cli path -> codex_cli / codex_workspace_write
+- feasibility_verifier / implementer via active_host -> never spawn an external CLI
 """
 
 from __future__ import annotations
@@ -67,14 +73,61 @@ GIT_WRITE_SUBCOMMANDS = frozenset(
     }
 )
 
+# Packet-scoped governance identity used by every test invocation. Deliberately
+# NOT a product name: the contract is that identity is arbitrary and explicit.
+GOVERNANCE = {
+    "governance_authority": "control-window-A",
+    "authorization_issuer": "control-window-A",
+    "acceptance_owner": "control-window-A",
+    "finding_adjudicator": "control-window-A",
+    "final_ratifier": "control-window-A",
+}
+
+EXECUTION_HOSTS = {"claude_hosted": "claude_code", "codex_hosted": "codex_desktop"}
+
+# Default task-packet body: carries the mechanically enforced authorization.
+PACKET_ALLOW = (
+    "fake task packet content\n"
+    "External-side-effect authorization: ALLOW_PROVIDER_INVOCATION\n"
+)
+
+# Default invocation path per role for test convenience (each test may override).
+DEFAULT_INVOCATION = {
+    "feasibility_verifier": "active_host",
+    "implementer": "headless_cli",
+    "adversarial_reviewer": "external_cli",
+}
+
+# provider/profile the fake result must carry, per (role, host_mode).
+ROLE_DEFAULTS = {
+    ("adversarial_reviewer", "claude_hosted"): ("codex_cli", "codex_read_only"),
+    ("adversarial_reviewer", "codex_hosted"): ("claude_cli", "claude_read_only"),
+    ("implementer", "claude_hosted"): ("codex_cli", "codex_workspace_write"),
+    ("implementer", "codex_hosted"): ("codex_cli", "codex_workspace_write"),
+}
+
 
 def default_routing():
     return json.loads(DEFAULT_ROUTING_FILE.read_text(encoding="utf-8"))
 
 
-def make_result(role, provider, profile, **overrides):
+def make_result(
+    role,
+    provider,
+    profile,
+    host_mode="claude_hosted",
+    invocation_path=None,
+    **overrides,
+):
+    if invocation_path is None:
+        invocation_path = DEFAULT_INVOCATION[role]
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "governance_identity": dict(GOVERNANCE),
+        "host_mode": host_mode,
+        "execution_host": EXECUTION_HOSTS[host_mode],
+        "host_tier": None,
+        "invocation_path": invocation_path,
         "role": role,
         "provider": provider,
         "profile": profile,
@@ -103,13 +156,6 @@ def make_result(role, provider, profile, **overrides):
     }
     result.update(overrides)
     return result
-
-
-ROLE_DEFAULTS = {
-    "feasibility_verifier": ("codex_cli", "codex_read_only"),
-    "implementer": ("codex_cli", "codex_workspace_write"),
-    "adversarial_reviewer": ("claude_cli", "claude_read_only"),
-}
 
 
 class RunnerTestCase(unittest.TestCase):
@@ -157,10 +203,27 @@ class RunnerTestCase(unittest.TestCase):
         path.write_text(json.dumps(routing, indent=2), encoding="utf-8")
         return path
 
+    def governance_argv(self):
+        return [
+            "--governance-authority",
+            GOVERNANCE["governance_authority"],
+            "--authorization-issuer",
+            GOVERNANCE["authorization_issuer"],
+            "--acceptance-owner",
+            GOVERNANCE["acceptance_owner"],
+            "--finding-adjudicator",
+            GOVERNANCE["finding_adjudicator"],
+            "--final-ratifier",
+            GOVERNANCE["final_ratifier"],
+        ]
+
     def run_runner(
         self,
         role,
         *,
+        host_mode="claude_hosted",
+        invocation_path=None,
+        governance=True,
         routing=None,
         mode="success",
         final=None,
@@ -172,16 +235,22 @@ class RunnerTestCase(unittest.TestCase):
         repo=None,
         extra_env=None,
         model="fake-model-1",
+        packet_text=PACKET_ALLOW,
+        flag_auth="ALLOW_PROVIDER_INVOCATION",
     ):
+        if invocation_path is None:
+            invocation_path = DEFAULT_INVOCATION.get(role)
         repo = repo or self.make_repo()
         artifact_dir = self.tmp / ("artifacts-" + uuid.uuid4().hex[:8])
         task_file = self.tmp / ("task-" + uuid.uuid4().hex[:8] + ".md")
-        task_file.write_text("fake task packet content\n", encoding="utf-8")
+        task_file.write_text(packet_text, encoding="utf-8")
         routing_path = self.write_routing(routing if routing is not None else default_routing())
         os.environ["FAKE_CLI_MODE"] = mode
-        if final is None and role in ROLE_DEFAULTS:
-            provider, profile = ROLE_DEFAULTS[role]
-            final = make_result(role, provider, profile)
+        if final is None and (role, host_mode) in ROLE_DEFAULTS:
+            provider, profile = ROLE_DEFAULTS[(role, host_mode)]
+            final = make_result(
+                role, provider, profile, host_mode=host_mode, invocation_path=invocation_path
+            )
         if final is not None:
             os.environ["FAKE_FINAL_RESULT"] = json.dumps(final)
         for key, value in (extra_env or {}).items():
@@ -205,6 +274,14 @@ class RunnerTestCase(unittest.TestCase):
             "--model",
             model,
         ]
+        if host_mode is not None:
+            argv += ["--host-mode", host_mode]
+        if invocation_path is not None:
+            argv += ["--invocation-path", invocation_path]
+        if governance:
+            argv += self.governance_argv()
+        if flag_auth is not None:
+            argv += ["--external-authorization", flag_auth]
         for path in allowed:
             argv += ["--allowed-file", path]
         for path in forbidden:
@@ -226,7 +303,7 @@ class RunnerTestCase(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Routing validation
+# Routing validation (schema v2: governance-neutral, host-aware, tier-aware)
 # ---------------------------------------------------------------------------
 
 
@@ -235,64 +312,267 @@ class RoutingValidationTests(RunnerTestCase):
         routing = oa.load_routing(DEFAULT_ROUTING_FILE)
         self.assertEqual(oa.validate_routing(routing), [])
 
-    def test_authority_owner_tamper_is_configuration_error(self):
+    def test_default_routing_pins_no_governance_owner(self):
+        # The governance owner must never be a fixed product value anywhere.
+        raw = DEFAULT_ROUTING_FILE.read_text(encoding="utf-8").lower()
+        self.assertNotIn("chatgpt", raw)
         routing = default_routing()
-        routing["authority"]["final_adjudicator"] = "implementer"
-        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", routing=routing)
-        self.assertEqual(rc, 2)
-        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertNotIn("authority", routing)
+        self.assertEqual(routing["governance"]["binding"], "task_packet")
 
-    def test_same_provider_implementer_reviewer_is_configuration_error(self):
+    def test_legacy_pinned_authority_block_is_configuration_error(self):
         routing = default_routing()
-        routing["roles"]["adversarial_reviewer"] = {
-            "provider": "codex_cli",
-            "profile": "codex_read_only",
-        }
+        routing["authority"] = {"final_adjudicator": "chatgpt"}
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("must not be pinned", invocation["detail"])
+
+    def test_governance_binding_tamper_is_configuration_error(self):
+        routing = default_routing()
+        routing["governance"]["binding"] = "chatgpt"
         rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
         self.assertEqual(rc, 2)
         self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
 
-    def test_unknown_provider_is_configuration_error(self):
+    def test_same_family_reviewer_is_configuration_error(self):
+        # Claude CLI must never be the claude_hosted reviewer (self-review).
         routing = default_routing()
-        routing["roles"]["implementer"]["provider"] = "openai_agentkit"
-        rc, artifacts, _, _ = self.run_runner("implementer", routing=routing)
-        self.assertEqual(rc, 2)
-        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
-
-    def test_unknown_profile_is_configuration_error(self):
-        routing = default_routing()
-        routing["roles"]["implementer"]["profile"] = "danger_full_access"
-        rc, artifacts, _, _ = self.run_runner("implementer", routing=routing)
-        self.assertEqual(rc, 2)
-        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
-
-    def test_read_only_role_with_write_profile_is_configuration_error(self):
-        routing = default_routing()
-        routing["roles"]["feasibility_verifier"] = {
-            "provider": "codex_cli",
-            "profile": "codex_workspace_write",
+        routing["host_modes"]["claude_hosted"]["external_reviewer"] = {
+            "provider": "claude_cli",
+            "profile": "claude_read_only",
         }
-        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", routing=routing)
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("opposing provider", invocation["detail"])
+
+    def test_unknown_reviewer_provider_is_configuration_error(self):
+        routing = default_routing()
+        routing["host_modes"]["claude_hosted"]["external_reviewer"]["provider"] = (
+            "openai_agentkit"
+        )
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
+        self.assertEqual(rc, 2)
+        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+
+    def test_unknown_reviewer_profile_is_configuration_error(self):
+        routing = default_routing()
+        routing["host_modes"]["claude_hosted"]["external_reviewer"]["profile"] = (
+            "danger_full_access"
+        )
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
+        self.assertEqual(rc, 2)
+        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+
+    def test_write_capable_reviewer_profile_is_configuration_error(self):
+        routing = default_routing()
+        routing["host_modes"]["claude_hosted"]["external_reviewer"]["profile"] = (
+            "codex_workspace_write"
+        )
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
+        self.assertEqual(rc, 2)
+        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+
+    def test_host_tier_mapped_to_external_cli_is_configuration_error(self):
+        # Codex CLI must never be a host-local tier (i.e. never the default
+        # implementer of any host mode).
+        routing = default_routing()
+        routing["host_modes"]["claude_hosted"]["local_tiers"]["worker"]["provider"] = (
+            "codex_cli"
+        )
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("external CLI provider", invocation["detail"])
+
+    def test_role_bindings_tamper_is_configuration_error(self):
+        routing = default_routing()
+        routing["role_bindings"]["implementer"] = "external_reviewer"
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
         self.assertEqual(rc, 2)
         self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
 
     def test_dispatch_constraint_tamper_is_configuration_error(self):
         routing = default_routing()
         routing["constraints"]["implementer_may_dispatch_reviewer"] = True
-        rc, artifacts, _, _ = self.run_runner("implementer", routing=routing)
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
         self.assertEqual(rc, 2)
         self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
 
-    def test_claude_subagent_routing_is_capability_unavailable(self):
+    def test_auto_reviewer_dispatch_constraint_tamper_is_configuration_error(self):
         routing = default_routing()
-        routing["roles"]["implementer"] = {
-            "provider": "claude_subagent",
-            "profile": "executor",
-        }
+        routing["constraints"]["host_may_auto_dispatch_reviewer"] = True
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
+        self.assertEqual(rc, 2)
+        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+
+    def test_one_active_host_constraint_tamper_is_configuration_error(self):
+        routing = default_routing()
+        routing["constraints"]["one_active_host"] = False
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
+        self.assertEqual(rc, 2)
+        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+
+    def test_missing_host_mode_definition_is_configuration_error(self):
+        routing = default_routing()
+        del routing["host_modes"]["codex_hosted"]
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
+        self.assertEqual(rc, 2)
+        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+
+    def test_headless_enabled_by_default_is_configuration_error(self):
+        routing = default_routing()
+        routing["headless_cli_implementation"]["enabled_by_default"] = True
         rc, artifacts, _, _ = self.run_runner("implementer", routing=routing)
         self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("never the default", invocation["detail"])
+
+
+# ---------------------------------------------------------------------------
+# Governance identity and host/tier explicitness (fail closed)
+# ---------------------------------------------------------------------------
+
+
+class IdentityFailClosedTests(RunnerTestCase):
+    def test_missing_governance_identity_is_configuration_error(self):
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            governance=False,
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("governance identity missing", invocation["detail"])
+        self.assertFalse(argv_file.exists(), "provider spawned without governance identity")
+
+    def test_missing_host_mode_is_configuration_error(self):
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", host_mode=None)
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("host mode must be explicit", invocation["detail"])
+
+    def test_unknown_host_mode_is_configuration_error(self):
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", host_mode="dual")
+        self.assertEqual(rc, 2)
+        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+
+    def test_missing_invocation_path_is_configuration_error(self):
+        # Force invocation_path to stay unset by picking a role and clearing it.
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer", invocation_path="unspecified"
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("invocation path", invocation["detail"])
+
+
+# ---------------------------------------------------------------------------
+# Dual-host role/path matrix
+# ---------------------------------------------------------------------------
+
+
+class DualHostMatrixTests(RunnerTestCase):
+    def test_claude_hosted_feasibility_is_active_host_only(self):
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
         invocation = self.assert_outcome(artifacts, "CAPABILITY_UNAVAILABLE")
-        self.assertIn("Task path", invocation["detail"])
+        self.assertIn("active host", invocation["detail"])
+        self.assertIn("claude_code", invocation["detail"])
+        self.assertFalse(argv_file.exists(), "external CLI spawned for feasibility")
+
+    def test_external_cli_feasibility_is_configuration_error(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier", invocation_path="external_cli"
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("active-host responsibility", invocation["detail"])
+
+    def test_claude_hosted_implementer_default_resolves_to_active_host(self):
+        # Codex CLI is no longer the Claude-hosted default implementer: the
+        # active_host path never spawns an external process.
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "implementer",
+            invocation_path="active_host",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CAPABILITY_UNAVAILABLE")
+        self.assertIn("worker/executor", invocation["detail"])
+        self.assertIn("headless", invocation["detail"])
+        self.assertFalse(argv_file.exists(), "external CLI spawned for active-host implementer")
+
+    def test_external_cli_implementer_is_configuration_error(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "implementer", invocation_path="external_cli"
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertIn("headless_cli", invocation["detail"])
+
+    def test_claude_hosted_reviewer_resolves_to_codex_cli(self):
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer")
+        self.assertEqual(rc, 0)
+        invocation = self.assert_outcome(artifacts, "SUCCESS")
+        self.assertEqual(invocation["provider"], "codex_cli")
+        self.assertEqual(invocation["profile"], "codex_read_only")
+        self.assertEqual(invocation["cli_version"], "fake-codex 0.0.1")
+        self.assertEqual(invocation["host_mode"], "claude_hosted")
+        self.assertEqual(invocation["execution_host"], "claude_code")
+        self.assertEqual(invocation["invocation_path"], "external_cli")
+
+    def test_codex_hosted_reviewer_resolves_to_claude_cli(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer", host_mode="codex_hosted"
+        )
+        self.assertEqual(rc, 0)
+        invocation = self.assert_outcome(artifacts, "SUCCESS")
+        self.assertEqual(invocation["provider"], "claude_cli")
+        self.assertEqual(invocation["profile"], "claude_read_only")
+        self.assertEqual(invocation["cli_version"], "fake-claude 0.0.1")
+        self.assertEqual(invocation["host_adapter_status"], "not_implemented")
+
+    def test_codex_hosted_feasibility_fails_closed(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier", host_mode="codex_hosted"
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CAPABILITY_UNAVAILABLE")
+        self.assertIn("not implemented", invocation["detail"])
+
+    def test_codex_hosted_implementer_fails_closed(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "implementer", host_mode="codex_hosted", invocation_path="active_host"
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CAPABILITY_UNAVAILABLE")
+        self.assertIn("not implemented", invocation["detail"])
+
+    def test_headless_implementer_is_recorded_as_headless(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "implementer",
+            mode="write-file",
+            allowed=("src/app.py",),
+            extra_env={"FAKE_WRITE_PATH": "src/app.py"},
+            final=make_result(
+                "implementer",
+                "codex_cli",
+                "codex_workspace_write",
+                changed_files=["src/app.py"],
+            ),
+        )
+        self.assertEqual(rc, 0)
+        invocation = self.assert_outcome(artifacts, "SUCCESS")
+        self.assertEqual(invocation["invocation_path"], "headless_cli")
+        self.assertEqual(invocation["profile"], "codex_workspace_write")
 
 
 # ---------------------------------------------------------------------------
@@ -323,13 +603,13 @@ class SessionBoundaryTests(RunnerTestCase):
 
 
 # ---------------------------------------------------------------------------
-# Codex read-only paths
+# External reviewer read-only paths (codex transport under claude_hosted)
 # ---------------------------------------------------------------------------
 
 
-class CodexReadOnlyTests(RunnerTestCase):
+class ExternalReviewerReadOnlyTests(RunnerTestCase):
     def test_read_only_happy_path_success(self):
-        rc, artifacts, _, _ = self.run_runner("feasibility_verifier")
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer")
         self.assertEqual(rc, 0)
         invocation = self.assert_outcome(artifacts, "SUCCESS")
         self.assertEqual(invocation["cli_version"], "fake-codex 0.0.1")
@@ -349,7 +629,7 @@ class CodexReadOnlyTests(RunnerTestCase):
 
     def test_read_only_tracked_write_is_mutation(self):
         rc, artifacts, repo, _ = self.run_runner(
-            "feasibility_verifier",
+            "adversarial_reviewer",
             mode="write-file",
             extra_env={"FAKE_WRITE_PATH": "src/app.py"},
         )
@@ -363,7 +643,7 @@ class CodexReadOnlyTests(RunnerTestCase):
 
     def test_read_only_untracked_write_is_mutation(self):
         rc, artifacts, repo, _ = self.run_runner(
-            "feasibility_verifier",
+            "adversarial_reviewer",
             mode="write-file",
             extra_env={"FAKE_WRITE_PATH": "NEW_FILE.txt"},
         )
@@ -374,7 +654,7 @@ class CodexReadOnlyTests(RunnerTestCase):
     def test_closed_gate_fixture_is_flagged_and_never_reverted(self):
         template_text = (REPO_TEMPLATE / "CLOSED_GATE.md").read_text(encoding="utf-8")
         rc, artifacts, repo, _ = self.run_runner(
-            "feasibility_verifier",
+            "adversarial_reviewer",
             mode="write-file",
             extra_env={"FAKE_WRITE_PATH": "CLOSED_GATE.md"},
         )
@@ -405,7 +685,7 @@ class ProviderArgvTests(RunnerTestCase):
     def test_codex_read_only_argv(self):
         stdin_capture = self.tmp / "captured-stdin.txt"
         rc, _, repo, _ = self.run_runner(
-            "feasibility_verifier",
+            "adversarial_reviewer",
             extra_env={
                 "FAKE_ARGV_FILE": str(self.tmp / "captured-argv.json"),
                 "FAKE_STDIN_FILE": str(stdin_capture),
@@ -427,11 +707,9 @@ class ProviderArgvTests(RunnerTestCase):
         self.assertIn("-C", argv)
         self.assertEqual(argv[argv.index("-C") + 1], str(repo))
         self.assertEqual(argv[-1], "-")
-        self.assertEqual(
-            stdin_capture.read_text(encoding="utf-8"), "fake task packet content\n"
-        )
+        self.assertEqual(stdin_capture.read_text(encoding="utf-8"), PACKET_ALLOW)
 
-    def test_codex_implementation_argv_requests_network_disabled(self):
+    def test_headless_implementation_argv_requests_network_disabled(self):
         rc, artifacts, _, _ = self.run_runner(
             "implementer",
             allowed=("src/app.py",),
@@ -449,7 +727,7 @@ class ProviderArgvTests(RunnerTestCase):
 
     def test_codex_argv_has_no_dangerous_bypass_flags(self):
         rc, _, _, _ = self.run_runner(
-            "feasibility_verifier",
+            "adversarial_reviewer",
             extra_env={"FAKE_ARGV_FILE": str(self.tmp / "captured-argv.json")},
         )
         self.assertEqual(rc, 0)
@@ -462,6 +740,7 @@ class ProviderArgvTests(RunnerTestCase):
     def test_claude_reviewer_argv_read_only_and_fresh(self):
         rc, _, _, _ = self.run_runner(
             "adversarial_reviewer",
+            host_mode="codex_hosted",
             extra_env={"FAKE_ARGV_FILE": str(self.tmp / "captured-argv.json")},
         )
         self.assertEqual(rc, 0)
@@ -483,7 +762,7 @@ class ProviderArgvTests(RunnerTestCase):
 
 
 # ---------------------------------------------------------------------------
-# Implementation changed-path validation
+# Headless implementation changed-path validation
 # ---------------------------------------------------------------------------
 
 
@@ -556,7 +835,7 @@ class ImplementationPathTests(RunnerTestCase):
 
 class ProcessBehaviorTests(RunnerTestCase):
     def test_nonzero_exit_preserves_stderr(self):
-        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", mode="nonzero")
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", mode="nonzero")
         self.assertEqual(rc, 1)
         invocation = self.assert_outcome(artifacts, "PROCESS_NONZERO")
         self.assertEqual(invocation["child_exit_code"], 3)
@@ -568,7 +847,7 @@ class ProcessBehaviorTests(RunnerTestCase):
     def test_timeout_kills_process_group_and_keeps_partial_transcript(self):
         pid_file = self.tmp / "pids.json"
         rc, artifacts, _, _ = self.run_runner(
-            "feasibility_verifier",
+            "adversarial_reviewer",
             mode="partial-timeout",
             timeout=1,
             grace=1,
@@ -602,7 +881,7 @@ class ProcessBehaviorTests(RunnerTestCase):
         repo = self.make_repo()
         artifact_dir = self.tmp / "artifacts-interrupt"
         task_file = self.tmp / "task-interrupt.md"
-        task_file.write_text("fake task packet content\n", encoding="utf-8")
+        task_file.write_text(PACKET_ALLOW, encoding="utf-8")
         routing_path = self.write_routing(default_routing())
         pid_file = self.tmp / "pids-interrupt.json"
         env = os.environ.copy()
@@ -615,7 +894,14 @@ class ProcessBehaviorTests(RunnerTestCase):
                 "--routing-file",
                 str(routing_path),
                 "--role",
-                "feasibility_verifier",
+                "adversarial_reviewer",
+                "--host-mode",
+                "claude_hosted",
+                "--invocation-path",
+                "external_cli",
+                *self.governance_argv(),
+                "--external-authorization",
+                "ALLOW_PROVIDER_INVOCATION",
                 "--workdir",
                 str(repo),
                 "--task-file",
@@ -649,7 +935,7 @@ class ProcessBehaviorTests(RunnerTestCase):
 
     def test_stdout_and_stderr_are_separate(self):
         rc, artifacts, _, _ = self.run_runner(
-            "feasibility_verifier",
+            "adversarial_reviewer",
             extra_env={"FAKE_STDERR_TEXT": "stderr-marker-line"},
         )
         self.assertEqual(rc, 0)
@@ -668,12 +954,12 @@ class ProcessBehaviorTests(RunnerTestCase):
 
 class StructuredOutputTests(RunnerTestCase):
     def test_invalid_final_json_is_invalid_output(self):
-        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", mode="invalid-json")
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", mode="invalid-json")
         self.assertEqual(rc, 1)
         self.assert_outcome(artifacts, "INVALID_OUTPUT")
 
     def test_missing_final_result_is_invalid_output(self):
-        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", mode="missing-final")
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", mode="missing-final")
         self.assertEqual(rc, 1)
         self.assert_outcome(artifacts, "INVALID_OUTPUT")
 
@@ -683,12 +969,12 @@ class StructuredOutputTests(RunnerTestCase):
         rc = None
         repo = self.make_repo()
         task_file = self.tmp / "task-del.md"
-        task_file.write_text("fake task packet content\n", encoding="utf-8")
+        task_file.write_text(PACKET_ALLOW, encoding="utf-8")
         routing_path = self.write_routing(default_routing())
         os.environ["FAKE_CLI_MODE"] = "delete-transcript"
         os.environ["FAKE_DELETE_PATH"] = str(artifact_dir / "stdout.jsonl")
         os.environ["FAKE_FINAL_RESULT"] = json.dumps(
-            make_result("feasibility_verifier", "codex_cli", "codex_read_only")
+            make_result("adversarial_reviewer", "codex_cli", "codex_read_only")
         )
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -698,7 +984,14 @@ class StructuredOutputTests(RunnerTestCase):
                     "--routing-file",
                     str(routing_path),
                     "--role",
-                    "feasibility_verifier",
+                    "adversarial_reviewer",
+                    "--host-mode",
+                    "claude_hosted",
+                    "--invocation-path",
+                    "external_cli",
+                    *self.governance_argv(),
+                    "--external-authorization",
+                    "ALLOW_PROVIDER_INVOCATION",
                     "--workdir",
                     str(repo),
                     "--task-file",
@@ -716,8 +1009,10 @@ class StructuredOutputTests(RunnerTestCase):
 
     def test_result_role_mismatch_is_invalid_output(self):
         rc, artifacts, _, _ = self.run_runner(
-            "feasibility_verifier",
-            final=make_result("implementer", "codex_cli", "codex_read_only"),
+            "adversarial_reviewer",
+            final=make_result(
+                "implementer", "codex_cli", "codex_read_only", invocation_path="external_cli"
+            ),
         )
         self.assertEqual(rc, 1)
         invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
@@ -766,7 +1061,7 @@ class StructuredOutputTests(RunnerTestCase):
         rc, artifacts, _, _ = self.run_runner(
             "adversarial_reviewer",
             final=make_result(
-                "adversarial_reviewer", "claude_cli", "claude_read_only", findings=[finding]
+                "adversarial_reviewer", "codex_cli", "codex_read_only", findings=[finding]
             ),
         )
         self.assertEqual(rc, 1)
@@ -786,19 +1081,43 @@ class StructuredOutputTests(RunnerTestCase):
         rc, artifacts, _, _ = self.run_runner(
             "adversarial_reviewer",
             final=make_result(
-                "adversarial_reviewer", "claude_cli", "claude_read_only", findings=[finding]
+                "adversarial_reviewer", "codex_cli", "codex_read_only", findings=[finding]
             ),
         )
         self.assertEqual(rc, 1)
         self.assert_outcome(artifacts, "INVALID_OUTPUT")
 
     def test_claude_reviewer_happy_path_success(self):
-        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer")
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer", host_mode="codex_hosted"
+        )
         self.assertEqual(rc, 0)
         self.assert_outcome(artifacts, "SUCCESS")
         final = json.loads((artifacts / "final-result.json").read_text(encoding="utf-8"))
         for field in ("findings", "observations", "suggestions", "evidence_gaps"):
             self.assertEqual(final[field], [])
+
+    def test_feasibility_verdicts_are_enforced_by_validate_result(self):
+        # Feasibility runs on the active host and never reaches this runner's
+        # spawn path, but the shared semantic validator still enforces the
+        # three-verdict contract for any feasibility result it is handed.
+        good = make_result(
+            "feasibility_verifier",
+            "codex_cli",
+            "codex_read_only",
+            invocation_path="external_cli",
+        )
+        self.assertEqual(
+            oa.validate_result(
+                good, "feasibility_verifier", "codex_cli", "codex_read_only", "fake-model-1"
+            ),
+            [],
+        )
+        bad = dict(good, verdict="LOOKS_FINE")
+        errors = oa.validate_result(
+            bad, "feasibility_verifier", "codex_cli", "codex_read_only", "fake-model-1"
+        )
+        self.assertTrue(any("feasibility verdict" in e for e in errors))
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +1127,7 @@ class StructuredOutputTests(RunnerTestCase):
 
 class ManifestTests(RunnerTestCase):
     def run_and_verify(self):
-        rc, artifacts, _, _ = self.run_runner("feasibility_verifier")
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer")
         self.assertEqual(rc, 0)
         return artifacts
 
@@ -860,6 +1179,10 @@ class StaticSafetyTests(unittest.TestCase):
             "danger-full-access",
         ):
             self.assertNotIn(token, self.SOURCE, token)
+
+    def test_no_pinned_governance_owner_in_source(self):
+        self.assertNotIn("chatgpt", self.SOURCE.lower())
+        self.assertNotIn("FIXED_AUTHORITY", self.SOURCE)
 
     def test_git_allowlist_is_read_only(self):
         self.assertTrue(oa.GIT_READ_ONLY_SUBCOMMANDS.isdisjoint(GIT_WRITE_SUBCOMMANDS))
@@ -975,6 +1298,34 @@ class StrictSchemaContractTests(unittest.TestCase):
     def test_runner_preflight_accepts_canonical_schema(self):
         self.assertEqual(oa.preflight_strict_schema(self.SCHEMA), [])
 
+    def test_envelope_distinguishes_dual_host_identity_fields(self):
+        required = set(self.SCHEMA["required"])
+        for field in (
+            "governance_identity",
+            "host_mode",
+            "execution_host",
+            "host_tier",
+            "invocation_path",
+            "role",
+            "provider",
+            "profile",
+            "model",
+            "session_id",
+        ):
+            self.assertIn(field, required, field)
+        self.assertEqual(self.SCHEMA["properties"]["schema_version"]["enum"], [2])
+        gov = self.SCHEMA["$defs"]["governance_identity"]
+        self.assertEqual(
+            set(gov["required"]),
+            {
+                "governance_authority",
+                "authorization_issuer",
+                "acceptance_owner",
+                "finding_adjudicator",
+                "final_ratifier",
+            },
+        )
+
 
 class SchemaPreflightTests(RunnerTestCase):
     """RC-1: preflight fails closed before any provider spawn."""
@@ -992,7 +1343,7 @@ class SchemaPreflightTests(RunnerTestCase):
         oa.RESULT_SCHEMA_FILE = bad_schema
         try:
             rc, artifacts, _, _ = self.run_runner(
-                "feasibility_verifier",
+                "adversarial_reviewer",
                 extra_env={"FAKE_ARGV_FILE": str(argv_file)},
             )
         finally:
@@ -1035,9 +1386,11 @@ class FixedEnvelopeTests(RunnerTestCase):
     """RC-1: every role emits the same envelope; semantics stay in the runner."""
 
     def test_non_reviewer_missing_collections_is_invalid_output(self):
-        final = make_result("feasibility_verifier", "codex_cli", "codex_read_only")
+        final = make_result("implementer", "codex_cli", "codex_workspace_write")
         del final["findings"]
-        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", final=final)
+        rc, artifacts, _, _ = self.run_runner(
+            "implementer", allowed=("src/app.py",), final=final
+        )
         self.assertEqual(rc, 1)
         invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
         self.assertIn("findings", invocation["detail"])
@@ -1072,15 +1425,327 @@ class FixedEnvelopeTests(RunnerTestCase):
 
     def test_model_mismatch_is_invalid_output(self):
         final = make_result(
-            "feasibility_verifier",
+            "adversarial_reviewer",
             "codex_cli",
             "codex_read_only",
             model="some-other-model",
         )
-        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", final=final)
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", final=final)
         self.assertEqual(rc, 1)
         invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
         self.assertIn("model mismatch", invocation["detail"])
+
+    def test_rewritten_governance_identity_is_invalid_output(self):
+        final = make_result("adversarial_reviewer", "codex_cli", "codex_read_only")
+        final["governance_identity"] = dict(
+            GOVERNANCE, final_ratifier="the-reviewer-itself"
+        )
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", final=final)
+        self.assertEqual(rc, 1)
+        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
+        self.assertIn("rewritten", invocation["detail"])
+
+    def test_host_mode_mismatch_is_invalid_output(self):
+        final = make_result(
+            "adversarial_reviewer",
+            "codex_cli",
+            "codex_read_only",
+            host_mode="codex_hosted",
+        )
+        final["execution_host"] = "claude_code"
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", final=final)
+        self.assertEqual(rc, 1)
+        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
+        self.assertIn("host_mode mismatch", invocation["detail"])
+
+    def test_external_reviewer_reporting_host_tier_is_invalid_output(self):
+        final = make_result(
+            "adversarial_reviewer", "codex_cli", "codex_read_only", host_tier="executor"
+        )
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", final=final)
+        self.assertEqual(rc, 1)
+        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
+        self.assertIn("host_tier must be null", invocation["detail"])
+
+
+class ArbitraryAuthorityTests(RunnerTestCase):
+    """F-X1: governance authority is packet-scoped, never derived or pinned."""
+
+    CUSTOM = {
+        "governance_authority": "acme-review-board",
+        "authorization_issuer": "release-manager-42",
+        "acceptance_owner": "qa-lead-7",
+        "finding_adjudicator": "independent-arbiter",
+        "final_ratifier": "steering-committee",
+    }
+
+    def custom_argv(self):
+        return [
+            "--governance-authority",
+            self.CUSTOM["governance_authority"],
+            "--authorization-issuer",
+            self.CUSTOM["authorization_issuer"],
+            "--acceptance-owner",
+            self.CUSTOM["acceptance_owner"],
+            "--finding-adjudicator",
+            self.CUSTOM["finding_adjudicator"],
+            "--final-ratifier",
+            self.CUSTOM["final_ratifier"],
+        ]
+
+    def run_with_custom_identity(self):
+        repo = self.make_repo()
+        artifact_dir = self.tmp / ("artifacts-" + uuid.uuid4().hex[:8])
+        task_file = self.tmp / "task-custom-authority.md"
+        task_file.write_text(PACKET_ALLOW, encoding="utf-8")
+        routing_path = self.write_routing(default_routing())
+        os.environ["FAKE_CLI_MODE"] = "success"
+        final = make_result("adversarial_reviewer", "codex_cli", "codex_read_only")
+        final["governance_identity"] = dict(self.CUSTOM)
+        os.environ["FAKE_FINAL_RESULT"] = json.dumps(final)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            rc = oa.main(
+                [
+                    "run",
+                    "--routing-file",
+                    str(routing_path),
+                    "--role",
+                    "adversarial_reviewer",
+                    "--host-mode",
+                    "claude_hosted",
+                    "--invocation-path",
+                    "external_cli",
+                    *self.custom_argv(),
+                    "--external-authorization",
+                    "ALLOW_PROVIDER_INVOCATION",
+                    "--workdir",
+                    str(repo),
+                    "--task-file",
+                    str(task_file),
+                    "--artifact-dir",
+                    str(artifact_dir),
+                    "--timeout-seconds",
+                    "30",
+                    "--model",
+                    "fake-model-1",
+                ]
+            )
+        return rc, artifact_dir
+
+    def test_arbitrary_explicit_authority_identity_is_accepted(self):
+        rc, artifacts = self.run_with_custom_identity()
+        self.assertEqual(rc, 0)
+        invocation = self.assert_outcome(artifacts, "SUCCESS")
+        self.assertEqual(invocation["governance_identity"], self.CUSTOM)
+
+    def test_authority_is_echoed_not_derived_from_host_or_provider(self):
+        rc, artifacts = self.run_with_custom_identity()
+        self.assertEqual(rc, 0)
+        invocation = self.read_invocation(artifacts)
+        # The recorded identity is exactly the packet input; no field equals
+        # the host, provider, or any product identity it could be derived from.
+        self.assertEqual(invocation["governance_identity"], self.CUSTOM)
+        derived_candidates = {
+            invocation["execution_host"],
+            invocation["provider"],
+            invocation["profile"],
+            invocation["host_mode"],
+            "chatgpt",
+            "claude",
+            "codex",
+        }
+        for value in invocation["governance_identity"].values():
+            self.assertNotIn(value, derived_candidates, value)
+
+    def test_partially_missing_authority_fields_fail_closed(self):
+        # Drop exactly one identity field: the runner must name it and stop.
+        argv_without_ratifier = self.governance_argv()[:-2]
+        repo = self.make_repo()
+        artifact_dir = self.tmp / "artifacts-partial-authority"
+        task_file = self.tmp / "task-partial-authority.md"
+        task_file.write_text(PACKET_ALLOW, encoding="utf-8")
+        routing_path = self.write_routing(default_routing())
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            rc = oa.main(
+                [
+                    "run",
+                    "--routing-file",
+                    str(routing_path),
+                    "--role",
+                    "adversarial_reviewer",
+                    "--host-mode",
+                    "claude_hosted",
+                    "--invocation-path",
+                    "external_cli",
+                    *argv_without_ratifier,
+                    "--external-authorization",
+                    "ALLOW_PROVIDER_INVOCATION",
+                    "--workdir",
+                    str(repo),
+                    "--task-file",
+                    str(task_file),
+                    "--artifact-dir",
+                    str(artifact_dir),
+                    "--timeout-seconds",
+                    "30",
+                    "--model",
+                    "fake-model-1",
+                ]
+            )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifact_dir, "CONFIGURATION_ERROR")
+        self.assertIn("final_ratifier", invocation["detail"])
+
+
+class ExternalAuthorizationTests(RunnerTestCase):
+    """F-X2: External-side-effect authorization is mechanically enforced."""
+
+    def assert_not_spawned(self, artifacts, argv_file):
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertFalse(
+            argv_file.exists(), "provider spawned despite missing/invalid authorization"
+        )
+        # Preflight failure evidence is preserved as an artifact bundle.
+        self.assertTrue((artifacts / "invocation.json").is_file())
+        self.assertTrue((artifacts / "manifest.sha256").is_file())
+        return invocation
+
+    def test_valid_authorization_spawns_provider(self):
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 0)
+        invocation = self.assert_outcome(artifacts, "SUCCESS")
+        self.assertEqual(
+            invocation["external_side_effect_authorization"], "ALLOW_PROVIDER_INVOCATION"
+        )
+        self.assertTrue(argv_file.exists())
+
+    def test_missing_packet_field_prevents_spawn(self):
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            packet_text="fake task packet content\n",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_not_spawned(artifacts, argv_file)
+        self.assertIn("does not carry", invocation["detail"])
+
+    def test_deny_value_prevents_spawn(self):
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            packet_text="External-side-effect authorization: DENY\n",
+            flag_auth="DENY",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_not_spawned(artifacts, argv_file)
+        self.assertIn("not authorized", invocation["detail"])
+
+    def test_unknown_value_prevents_spawn(self):
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            packet_text="External-side-effect authorization: ALLOW_EVERYTHING\n",
+            flag_auth="ALLOW_EVERYTHING",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        self.assert_not_spawned(artifacts, argv_file)
+
+    def test_none_value_prevents_spawn(self):
+        # An implementer-style NONE packet can never authorize a reviewer
+        # invocation: each external call needs its own packet authorization.
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            packet_text=(
+                "| External-side-effect authorization | NONE（不得 dispatch reviewer） |\n"
+            ),
+            flag_auth="NONE",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_not_spawned(artifacts, argv_file)
+        self.assertIn("not authorized", invocation["detail"])
+
+    def test_packet_flag_mismatch_prevents_spawn(self):
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            packet_text=PACKET_ALLOW,
+            flag_auth="DENY",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_not_spawned(artifacts, argv_file)
+        self.assertIn("mismatch", invocation["detail"])
+
+    def test_flag_alone_without_packet_field_prevents_spawn(self):
+        # A caller-side value can never stand in for the packet authorization.
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            packet_text="fake task packet content\n",
+            flag_auth="ALLOW_PROVIDER_INVOCATION",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        self.assert_not_spawned(artifacts, argv_file)
+
+    def test_packet_alone_without_flag_prevents_spawn(self):
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            packet_text=PACKET_ALLOW,
+            flag_auth=None,
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_not_spawned(artifacts, argv_file)
+        self.assertIn("--external-authorization", invocation["detail"])
+
+    def test_ambiguous_conflicting_values_prevent_spawn(self):
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            packet_text=(
+                "External-side-effect authorization: ALLOW_PROVIDER_INVOCATION\n"
+                "External-side-effect authorization: NONE\n"
+            ),
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_not_spawned(artifacts, argv_file)
+        self.assertIn("ambiguous", invocation["detail"])
+
+    def test_headless_implementer_also_requires_packet_authorization(self):
+        # Implementer-path spawns are gated by the same per-packet check; an
+        # authorization on some other packet never carries over.
+        argv_file = self.tmp / "captured-argv.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "implementer",
+            allowed=("src/app.py",),
+            packet_text="| External-side-effect authorization | NONE |\n",
+            flag_auth="NONE",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        self.assert_not_spawned(artifacts, argv_file)
+
+    def test_parser_accepts_table_cell_form_with_annotation(self):
+        value, errors = oa.parse_packet_external_authorization(
+            "| External-side-effect authorization | "
+            "ALLOW_PROVIDER_INVOCATION（僅此一次 Codex CLI 呼叫） |\n"
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual(value, "ALLOW_PROVIDER_INVOCATION")
 
 
 class ClaudeInvocationContractTests(RunnerTestCase):
@@ -1089,6 +1754,7 @@ class ClaudeInvocationContractTests(RunnerTestCase):
     def test_claude_argv_includes_verbose_with_stream_json(self):
         rc, _, _, _ = self.run_runner(
             "adversarial_reviewer",
+            host_mode="codex_hosted",
             extra_env={"FAKE_ARGV_FILE": str(self.tmp / "captured-argv.json")},
         )
         self.assertEqual(rc, 0)

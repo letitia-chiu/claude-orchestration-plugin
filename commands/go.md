@@ -9,6 +9,9 @@ Execution order from the user. Final adjustments (may be empty): $ARGUMENTS
 This command is the formal start-work signal that `/orchestration:kickoff` waits for. It authorizes execution of **exactly one currently authorized role or batch** — nothing more.
 
 1. **Locate the formal execution authority.** Conversation memory alone is not authority. The authorization must reference an authoritative plan with a verifiable identity:
+   - governance identity (Governance authority / Authorization issuer / Acceptance owner / Finding adjudicator / Final ratifier — packet-scoped, never assumed, never pinned to a product by the plugin);
+   - host mode (`claude_hosted` or `codex_hosted` — exactly one active host; missing host mode = stop);
+   - host-local tier authorization (which scout/worker/executor tier this batch may use) and invocation path (`active_host` / `external_cli` / `headless_cli`);
    - authoritative planning branch;
    - authoritative plan commit SHA;
    - canonical base SHA;
@@ -34,9 +37,15 @@ This command is the formal start-work signal that `/orchestration:kickoff` waits
 
    If verification fails, or the requested work exceeds what the plan authorizes (scope drift), stop before any execution.
 
-3. **Resolve routing, then execute through the dispatch contract.** Determine the executable role for this authorization (`feasibility_verifier`, `implementer`, or `adversarial_reviewer` — or orchestrator-owned work that needs no dispatch), read the target project's `docs/playbook/agent-routing.json`, resolve provider/profile, and hand off per the `/orchestration:dispatch` contract. Unknown or unsafe routing stops before any provider spawn. Do not re-ask for permission for the exact authorized scope — this command *is* that permission.
+3. **Resolve routing, then execute through the dispatch contract.** Determine the executable role for this authorization (`feasibility_verifier`, `implementer`, or `adversarial_reviewer` — or orchestrator-owned work that needs no dispatch), read the target project's `docs/playbook/agent-routing.json` (schema v2), and resolve through the dual-host contract:
+   - **Claude-hosted feasibility/implementation** runs on the active Claude host via the Task/agent path, using the host's own scout/worker/executor tier named in the authorization — never an external CLI by default;
+   - **the adversarial reviewer** resolves to the opposing provider's CLI (claude_hosted → Codex CLI read-only) and requires its own independent reviewer authorization — `/go` for an implementation batch never implies it;
+   - **headless CLI implementation** requires the authorization to name `headless_cli` explicitly — it is never inferred;
+   - **`codex_hosted` execution fails closed**: the Codex-host adapter is not implemented; do not pretend it is available.
 
-4. **Missing authority = stop.** If the authoritative plan identity fields are missing, do not substitute a "I believe you meant…" plus an ordinary confirmation. Stop and list exactly which authority fields are missing (branch, plan commit SHA, canonical base SHA, role/batch, allowed/forbidden files, acceptance, stop conditions, Git authorization, External-side-effect authorization).
+   Hand off per the `/orchestration:dispatch` contract. Unknown or unsafe routing stops before any spawn. Do not re-ask for permission for the exact authorized scope — this command *is* that permission.
+
+4. **Missing authority = stop.** If the authoritative plan identity fields are missing, do not substitute a "I believe you meant…" plus an ordinary confirmation. Stop and list exactly which authority fields are missing (governance identity, host mode, host-local tier, invocation path, branch, plan commit SHA, canonical base SHA, role/batch, allowed/forbidden files, acceptance, stop conditions, Git authorization, External-side-effect authorization).
 
 Scope rules:
 

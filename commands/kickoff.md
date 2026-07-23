@@ -19,17 +19,26 @@ Follow the kickoff flow:
 2. **Blind-spot pass**: answer the interview's step-1 checklist item by item (machine/environment, task shape, behavior matrix, user experience); be honest about what you can't answer — list those as unknowns. For questions that need current code state, dispatch a read-only scout rather than reading a lot of files yourself.
 3. **Questions**: ask only within the five categories, max 3 questions, each with a recommended option (interview step 2's question threshold).
 4. **Plan**: write up the parts most likely to change and most in need of confirmation first; flag risk gates (situations where you must stop); preserve invariant-owner assignment and defect-class closure requirements for any known findings; then write the **dispatch breakdown by workflow role**, not by provider name:
-   - local/read-only reconnaissance (scout via the `claude_subagent` path);
-   - `feasibility_verifier` — repository-local feasibility check against an authoritative plan commit;
-   - `implementer` — the authorized implementation batches;
-   - `adversarial_reviewer` — fresh-context, read-only review of the candidate result;
+   - local/read-only reconnaissance (scout — the active host's fast read-only tier);
+   - `feasibility_verifier` — repository-local feasibility check against an authoritative plan commit, run by the **active host's own local tier** (never an external CLI);
+   - `implementer` — the authorized implementation batches, run by the **active host's own worker/executor tier**;
+   - `adversarial_reviewer` — fresh-context, read-only review of the candidate result by the **opposing provider's CLI** (claude_hosted → Codex CLI; codex_hosted → Claude CLI), requiring its own independent authorization;
    - orchestrator-owned judgment (things too small or too judgment-heavy to dispatch).
 
-   For each role, the provider/profile comes from the target project's `docs/playbook/agent-routing.json` — do not hardcode worker/executor/an external model as the routing rule. You may note that the `claude_subagent` fallback path (scout/worker/executor) exists, but it is a routing option, not the fixed default.
+   The routing contract is the target project's `docs/playbook/agent-routing.json` (schema v2: governance-neutral, host-aware, tier-aware). Do not hardcode a provider as the routing rule, and never treat an external CLI as the default implementer or the host's own CLI as its own reviewer. Headless CLI implementation (`headless_cli_implementation`) exists only as a non-default, separately authorized opt-in. If the plan proposes `codex_hosted` execution, state that the Codex-host adapter is not implemented and the plan must fail closed there.
 
 **Plan identity requirement.** A kickoff plan draft is a draft. Conversation text alone is not execution authority. State in the plan that before formal `/orchestration:go` execution, the plan must exist with a verifiable planning commit identity, and must carry at least these fields:
 
 ```text
+Governance authority
+Authorization issuer
+Acceptance owner
+Finding adjudicator
+Final ratifier
+Host mode (claude_hosted | codex_hosted — exactly one)
+Active execution host
+Host-local tier plan (which scout/worker/executor tiers for which batches)
+Invocation path per role (active_host | external_cli | headless_cli)
 Authoritative plan branch
 Authoritative plan commit SHA
 Canonical base SHA
@@ -42,9 +51,11 @@ Acceptance commands
 Stop conditions
 Git authorization
 External-side-effect authorization
-Role map (role -> provider/profile, from agent-routing.json)
+Role map (role -> binding, from agent-routing.json schema v2)
 ```
 
-**External-side-effect boundary.** Kickoff never spends external provider quota on its own. Even though `feasibility_verifier` is read-only, invoking an external CLI provider is an external side effect: it must be listed in the plan, carry an explicit External-side-effect authorization, and be triggered by a later `/orchestration:go` or an explicit dispatch authorization — never by kickoff itself.
+The governance identity fields are packet-scoped: the plugin never pins them to ChatGPT, Claude, Codex, or any product, and no provider may rewrite them mid-execution.
+
+**External-side-effect boundary.** Kickoff never spends external provider quota on its own. Feasibility and implementation run on the active host's own tiers, but any external CLI invocation (the adversarial reviewer, or an opt-in headless implementation) is an external side effect: it must be listed in the plan, carry an explicit External-side-effect authorization plus its own independent reviewer/headless authorization, and be triggered by a later `/orchestration:go` or an explicit dispatch authorization — never by kickoff itself, and never automatically by the implementer.
 
 Output the plan, then **stop and end your turn — do not begin execution**. Do not modify files. Do not invoke write-capable providers. Do not invoke external CLI providers without explicit authorization. This applies **regardless of how small or reversible the task looks**; "small and reversible" is not an exemption. While waiting you may answer questions, revise the plan, and run **read-only** local reconnaissance (scout) to close remaining unknowns.

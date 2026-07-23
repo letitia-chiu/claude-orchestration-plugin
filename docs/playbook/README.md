@@ -20,11 +20,11 @@
 | 設計新功能 | `architecture-constraints.md` 全文＋`known-failures.md` §架構級 |
 | 動手寫 code 前後 | `review-rubric.md`（風險分級＋驗證電池決策表） |
 | 修 bug | `debug-playbook.md`（症狀速查）→ `known-failures.md`（別踩回舊坑）；動手修之前補跑盲區 pass |
-| 委派或覆核外部 provider（role→provider 路由） | `task-routing.md`＋`agent-routing.json`＋`handoff-template.md` §工單；外部派工單用 plugin 附帶範本 `examples/task-packets/`（codex-feasibility／codex-implementation／claude-adversarial-review），回報對照 `examples/schemas/orchestration-result.schema.json` |
+| 委派或覆核（governance／host／tier／reviewer 四層路由） | `task-routing.md`＋`agent-routing.json`＋`handoff-template.md` §工單；派工單用 plugin 附帶範本 `examples/task-packets/`（active-host-feasibility／active-host-implementation／codex-adversarial-review／claude-adversarial-review／headless-codex-implementation），回報對照 `examples/schemas/orchestration-result.schema.json`（schema v2） |
 | 大案子執行中 | `implementation-notes-template.md` |
 | 收尾/交班/換機 | `handoff-template.md`＋`review-rubric.md` §完成定義 |
 
-> 註：`agent-routing.json` 是角色→provider 對映的 SSOT。外部 CLI provider 的機械化包裝（bounded runner：timeout、transcript、Git 證據、allowlist 驗證）由 orchestration codex enablement 後續 batch 提供，尚非現成能力。
+> 註：`agent-routing.json`（schema v2）是 governance-neutral、host-aware、tier-aware 路由的 SSOT：governance identity 由每次 task packet 明示；host mode（claude_hosted／codex_hosted）一次一個；feasibility／implementation 走 active host 自家 scout／worker／executor；external reviewer 用對方 CLI（經 bounded runner：timeout、transcript、Git 證據、allowlist 驗證）。Codex-host adapter 尚未實作＝fail closed；headless CLI implementation 為非預設 opt-in。
 
 ## 日常工作流
 

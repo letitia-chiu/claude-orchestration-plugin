@@ -9,7 +9,7 @@ Generate skeleton files under `docs/playbook/` in the **current (target) project
 
 11 files total: `README.md`, `orchestration.md`, `architecture-constraints.md`, `unknowns-interview.md`, `review-rubric.md`, `debug-playbook.md`, `known-failures.md`, `handoff-template.md`, `implementation-notes-template.md`, `task-routing.md`, `agent-routing.json`.
 
-What the generated playbook provides: role-first routing contracts (workflow roles resolved to provider/profile via `agent-routing.json`), pointers to this plugin's task-packet templates (`examples/task-packets/`) and result schema (`examples/schemas/orchestration-result.schema.json`), and the contract surface for the bounded external-agent runner integration. Do not claim more than that: no real Codex/Claude smoke test has been passed by generating these files, network isolation is not thereby verified against real CLIs, arbitrary providers are not supported, and no runner is installed into the target project. This command never modifies the target project's Claude settings or hooks.
+What the generated playbook provides: governance-neutral, host-aware, tier-aware routing contracts (`agent-routing.json` schema v2 — governance identity comes from each task packet; feasibility/implementation belong to the active host's scout/worker/executor tiers; the adversarial reviewer is the opposing provider's read-only CLI; headless CLI implementation is a non-default opt-in), pointers to this plugin's task-packet templates (`examples/task-packets/`) and result schema (`examples/schemas/orchestration-result.schema.json`, schema v2), and the contract surface for the bounded external-agent runner integration. Do not claim more than that: the Codex-host adapter is not implemented (codex_hosted active-host execution fails closed), no real Codex/Claude smoke test has been passed by generating these files, network isolation is not thereby verified against real CLIs, arbitrary providers are not supported, and no runner is installed into the target project. This command never modifies the target project's Claude settings or hooks.
 
 ---
 
@@ -40,11 +40,11 @@ What the generated playbook provides: role-first routing contracts (workflow rol
 | 設計新功能 | `architecture-constraints.md` 全文＋`known-failures.md` §架構級 |
 | 動手寫 code 前後 | `review-rubric.md`（風險分級＋驗證電池決策表） |
 | 修 bug | `debug-playbook.md`（症狀速查）→ `known-failures.md`（別踩回舊坑）；動手修之前補跑盲區 pass |
-| 委派或覆核外部 provider（role→provider 路由） | `task-routing.md`＋`agent-routing.json`＋`handoff-template.md` §工單；外部派工單用 plugin 附帶範本 `examples/task-packets/`（codex-feasibility／codex-implementation／claude-adversarial-review），回報對照 `examples/schemas/orchestration-result.schema.json` |
+| 委派或覆核（governance／host／tier／reviewer 四層路由） | `task-routing.md`＋`agent-routing.json`＋`handoff-template.md` §工單；派工單用 plugin 附帶範本 `examples/task-packets/`（active-host-feasibility／active-host-implementation／codex-adversarial-review／claude-adversarial-review／headless-codex-implementation），回報對照 `examples/schemas/orchestration-result.schema.json`（schema v2） |
 | 大案子執行中 | `implementation-notes-template.md` |
 | 收尾/交班/換機 | `handoff-template.md`＋`review-rubric.md` §完成定義 |
 
-> 註：`agent-routing.json` 是角色→provider 對映的 SSOT。外部 CLI provider 的機械化包裝（bounded runner：timeout、transcript、Git 證據、allowlist 驗證）由 orchestration codex enablement 後續 batch 提供，尚非現成能力。
+> 註：`agent-routing.json`（schema v2）是 governance-neutral、host-aware、tier-aware 路由的 SSOT：governance identity 由每次 task packet 明示；host mode（claude_hosted／codex_hosted）一次一個；feasibility／implementation 走 active host 自家 scout／worker／executor；external reviewer 用對方 CLI（經 bounded runner：timeout、transcript、Git 證據、allowlist 驗證）。Codex-host adapter 尚未實作＝fail closed；headless CLI implementation 為非預設 opt-in。
 
 ## 日常工作流
 
@@ -83,56 +83,60 @@ What the generated playbook provides: role-first routing contracts (workflow rol
 |---|---|
 | 適用場景 | 統籌窗（使用者開的主 session）的日常運作：拆單、派工、驗收、交班 |
 | 不適用場景 | 產品本身的 runtime 行為；純聊天／一句話問答 |
-| 必讀前置 | `README.md`＋`task-routing.md`＋`agent-routing.json`（角色→provider 路由） |
-| 不能違反的約束 | 驗收永遠在統籌；規格不清不准派工；同一不變量只准一個實作 owner |
+| 必讀前置 | `README.md`＋`task-routing.md`＋`agent-routing.json`（schema v2：governance-neutral、host-aware、tier-aware） |
+| 不能違反的約束 | governance authority ≠ active host ≠ host-local tier ≠ external reviewer；驗收歸屬 packet 明示的 acceptance owner；規格不清不准派工；同一不變量只准一個實作 owner |
 | 例外處理 | 止血可統籌親手做＋事後補審；同一 defect family 在外部覆核重現兩次＝停止逐點修補，升級方法或 owner |
 | 驗收方式 | 不只看測試全綠：必須同時有 inventory、class closure、adversarial probe、valid-path regression |
 
 ## 架構一張圖
 
 ```text
-權責層（不可執行、不可路由）
-ChatGPT ＝ architecture／authoritative plan／authorization／acceptance／final adjudication owner
+Explicit governance authority（每次 packet／流程明示，不固定為任何產品）
+│  authoritative plan / authorization / acceptance / adjudication / final ratification
 │
-統籌（主窗，當下可用的最高智慧模型 + high effort）
-│  只做：理解需求、盲區／提問、抽象化 finding、拆單、依 agent-routing.json 路由派工、
-│        對抗式驗收整理、整合、交班（驗收與裁定的最終權在權責層）
-│
-├─ feasibility_verifier ＝唯讀可行性查證（fresh session；預設 codex_cli / codex_read_only）
-├─ implementer          ＝主要實作（限授權 worktree；預設 codex_cli / codex_workspace_write）
-├─ adversarial_reviewer ＝fresh-context 對抗式覆核（只審不改；預設 claude_cli / claude_read_only）
-├─ claude_subagent path ＝scout（Haiku 4.5 唯讀偵察）／worker（Sonnet 5）／executor（Opus 4.8）
-│                         既有 agents 完整保留，是隨時可切回的 fallback provider
-└─ 驗證 lens            ＝內部對抗式審查；不取代外部獨立覆核
+└─ selected active host（一次一個：claude_hosted 或 codex_hosted）
+   │
+   ├─ Claude-host adapter（本 plugin；已實作）
+   │   ├─ 統籌（主窗，當下可用的最高智慧模型 + high effort）
+   │   ├─ scout / worker / executor ＝ Claude-native model tiers（既有 agents，模型釘選不變）
+   │   ├─ feasibility_verifier／implementer ＝ active Claude host 自家 tier（Task path）
+   │   └─ adversarial_reviewer ＝ Codex CLI（codex_read_only；獨立授權後經 bounded runner 派）
+   │
+   └─ Codex-host adapter（尚未實作；等本機唯讀 feasibility）
+       ├─ scout / worker / executor ＝ Codex-native model tiers
+       └─ adversarial_reviewer ＝ Claude CLI（claude_read_only）
 ```
 
-- 角色（做什麼）與 provider（用哪個引擎執行）分離；provider 對映以 `agent-routing.json` 為 SSOT，細節見 `task-routing.md`。
+- 四層分離：**governance authority ≠ active host ≠ host-local tier ≠ external reviewer**；細節見 `task-routing.md`，SSOT＝`agent-routing.json`（schema v2）。
 - 統籌模型：當下可用的最高智慧模型＋effort high。
-- claude_subagent path 成本權重（API 定價比例，訂閱額度同方向）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15**。effort：統籌自選（/effort）；executor/worker＝medium（釘在 agents frontmatter）；scout（Haiku 4.5）不支援 effort 參數＝不設。
+- Claude-native tier 成本權重（API 定價比例，訂閱額度同方向）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15**。effort：統籌自選（/effort）；executor/worker＝medium（釘在 agents frontmatter）；scout（Haiku 4.5）不支援 effort 參數＝不設。
 - 執行者一律**開工第一行自報模型 ID**（釘選探針的指紋機制，防「以為派了便宜的、其實跑到貴的」）；外部 CLI provider 另以工單的 Explicit model 欄位釘住；高風險覆核另驗 model＋effort。
+- `codex_workspace_write` headless implementation 保留為明示 opt-in（`headless_cli_implementation`），非任何 host mode 的預設。
 
-## 角色與 provider 分離
+## 角色與四層分離
 
-權責 owner 固定、不可路由：
+governance identity **不固定、不可路由、由每次 packet 明示**：
 
 ```text
-architecture_owner        = chatgpt
-authoritative_plan_owner  = chatgpt
-authorization_owner       = chatgpt
-acceptance_owner          = chatgpt
-final_adjudicator         = chatgpt
+Governance authority
+Authorization issuer
+Acceptance owner
+Finding adjudicator
+Final ratifier
 ```
 
-執行角色只有三個：`feasibility_verifier`（唯讀查證）、`implementer`（單一 batch 實作）、`adversarial_reviewer`（fresh-context 只審不改）。行為契約與 provider 無關，換 provider 不換契約。
+執行角色只有三個：`feasibility_verifier`（唯讀查證，active host 自家 tier）、`implementer`（單一 batch 實作，active host 自家 tier）、`adversarial_reviewer`（fresh-context 只審不改，對方 CLI）。行為契約與 host 無關，換 host mode 不換契約。
 
 不可越權的硬邊界：
 
-- implementer 不得 dispatch reviewer；reviewer 不得修 code；兩者 provider 必須不同（fail closed）。
+- implementer 不得 dispatch reviewer；reviewer 不得修 code；reviewer 必須來自 active host 的對方 provider 家族（fail closed）。
 - feasibility 與 implementation 不共用 session；reviewer 永遠 fresh session。
-- 外部 provider 的任何 Git 寫入需 authorization owner 另行明文授權。
-- reviewer 產出的是 candidate findings；成立與否由 final_adjudicator 裁定，統籌只做整理與轉呈。
+- 任何 Git 寫入需 packet 明示的 authorization issuer 另行明文授權。
+- reviewer 產出的是 candidate findings；成立與否由 packet 明示的 finding adjudicator 裁定，統籌只做整理與轉呈。
+- tier 較高不代表授權較多：scout／worker／executor 只改能力與成本，不改 Git 或 governance authority。
+- active host 不因負責 implementation 就自動取得 acceptance 或 final-ratification authority。
 
-可逆性：把 implementer 換回 `claude_subagent`（worker／executor）或 reviewer 換回其他已支援 provider，只改 `agent-routing.json`＋工單；commands 與本檔方法論不動。
+可逆性：換 host mode 只改 packet 的 `Host mode` 與 host-local model mapping（`model_override`）；shared methodology、packet 與 finding 語意不動。Codex-hosted adapter 未經本機 feasibility 證明前一律 fail closed。
 
 ## 統籌七律
 
@@ -158,10 +162,10 @@ final_adjudicator         = chatgpt
 
 | 任務長相 | role（→ 預設 provider/profile） | 附加規則 |
 |---|---|---|
-| 現況／檔案／surface 盤點 | scout（claude_subagent） | 唯讀；回傳結論＋證據，不貼大段原文 |
-| 對 authoritative plan 的 repository-local 可行性查證 | feasibility_verifier（→ codex_cli / codex_read_only） | 唯讀、fresh session；verdict 只有三種；工單用 codex-feasibility packet |
-| 規格明確、已授權的實作 batch | implementer（→ codex_cli / codex_workspace_write） | 限授權 worktree＋allowed files；工單用 codex-implementation packet；fallback＝claude_subagent worker（邊界獨立；不得與其他 agent 共用同一 invariant owner）／executor（跨模組、精密；production＋共用 validator＋inventory＋boundary tests 同一 context） |
-| 高風險第二雙眼 | adversarial_reviewer（→ claude_cli / claude_read_only） | fresh context、只審不改、凍結候選集合；工單用 claude-adversarial-review packet；覆核模型依風險分級（平衡型日常／旗艦關卡／輕量低風險；專案有委派範本則照其格式）；finding 成立由 final_adjudicator 裁定；外部 reviewer 不可用＝lens 加倍（rubric 有明文） |
+| 現況／檔案／surface 盤點 | scout（active host 自家快速唯讀檔位；Claude-hosted＝Haiku tier） | 唯讀；回傳結論＋證據，不貼大段原文 |
+| 對 authoritative plan 的 repository-local 可行性查證 | feasibility_verifier（→ active_host_local_tier；Claude-hosted＝自家 tier 唯讀查證） | 唯讀、fresh session；verdict 只有三種；工單用 active-host-feasibility packet；**不走 external CLI** |
+| 規格明確、已授權的實作 batch | implementer（→ active_host_local_tier；Claude-hosted＝worker（邊界獨立；不得與其他 agent 共用同一 invariant owner）／executor（跨模組、精密；production＋共用 validator＋inventory＋boundary tests 同一 context）） | 限授權 worktree＋allowed files；工單用 active-host-implementation packet；headless_cli_implementation（codex_workspace_write）為非預設 opt-in，工單用 headless-codex-implementation packet＋獨立授權 |
+| 高風險第二雙眼 | adversarial_reviewer（→ 對方 CLI：claude_hosted＝codex_cli / codex_read_only；codex_hosted＝claude_cli / claude_read_only） | fresh context、只審不改、凍結候選集合；需獨立 reviewer authorization；工單用 codex-adversarial-review／claude-adversarial-review packet；覆核模型依風險分級且由 packet 明示；finding 成立由 packet 明示的 finding adjudicator 裁定；外部 reviewer 不可用＝lens 加倍（rubric 有明文） |
 | 判斷／語氣／審美／小事 | 統籌自己 | 派工成本高於自做 |
 
 ## finding 泛化規則
@@ -442,80 +446,124 @@ Explicit exclusions:
 ## File 10/11: `docs/playbook/task-routing.md`
 
 ````markdown
-# 模型分工與任務路由（role-first、provider-second）
+# 模型分工與任務路由（governance-neutral、host-aware、tier-aware）
 
 | 欄位 | 內容 |
 |---|---|
 | 適用場景 | 統籌把工作派給執行角色時的路由決策：查證可行性、實作、對抗式覆核 |
-| 不適用場景 | 權責層決策本身（architecture／plan／授權／驗收／裁定——那是 owner 的事，不路由給執行角色） |
-| 必讀前置 | `orchestration.md`＋本專案 `agent-routing.json` |
-| 不能違反的約束 | 角色（做什麼）與 provider/profile（用哪個引擎、什麼權限）分離；implementer 與 adversarial_reviewer 的 provider 必須不同；唯讀角色不得映射到可寫 profile |
-| 例外處理 | routing 無法解析、provider 不可用、或 profile 能力缺失＝停止派工並回報，不得靜默降級或換用未授權 provider |
-| 驗收方式 | 換 provider 只需改 `agent-routing.json`＋工單，不需改 commands 或本 playbook 的方法論 |
+| 不適用場景 | governance 決策本身（plan／授權／驗收／裁定——那是 packet 明示的 governance identity 的事，不路由給執行角色） |
+| 必讀前置 | `orchestration.md`＋本專案 `agent-routing.json`（schema v2） |
+| 不能違反的約束 | governance authority ≠ active execution host ≠ host-local execution tier ≠ external reviewer；四層分離不得混同；唯讀角色不得映射到可寫 profile |
+| 例外處理 | routing 無法解析、host adapter 未實作、provider 不可用、或 profile 能力缺失＝停止派工並回報，不得靜默降級、fallback 或換用未授權 provider |
+| 驗收方式 | 換 host mode 只改 packet 的 `Host mode`＋host-local model mapping；shared methodology、packet 與 finding 語意不複製、不漂移 |
 
-## 兩層分離：role 與 provider
+## 四層分離（核心不變量）
 
 ```text
-role             = 做什麼（行為契約，與引擎無關）
-provider/profile = 用哪一個執行引擎、以什麼權限執行
+governance authority ≠ active execution host ≠ host-local execution tier ≠ external reviewer
 ```
 
-角色契約固定不變；provider 由目標專案的 `docs/playbook/agent-routing.json` 決定。這是薄角色層，**不是** generic provider framework——不支援任意 provider、不做 capability negotiation、不做 automatic fallback、不做 session migration。
+| 層 | 是什麼 | 由誰決定 |
+|---|---|---|
+| governance authority | plan／授權／驗收／裁定的權責 identity | 每次 task packet／流程明示，**不由 plugin 固定** |
+| active execution host | 本次 Gate 的執行宿主（`claude_hosted` 或 `codex_hosted`，一次只能一個） | packet 的 `Host mode` 欄 |
+| host-local execution tier | active host 自家的 `scout`／`worker`／`executor` 模型檔位 | active host 依 task risk 選擇，packet 記錄 |
+| external reviewer | 對方 provider 的 CLI，fresh、read-only 對抗式覆核 | 獨立 reviewer authorization 後才派 |
 
-## Workflow roles
+## Governance identity（不固定產品）
 
-### 權責層（不可路由、不可執行）
+routing 檔**不含**任何固定 owner。每個正式 Gate／task packet 必須明示：
 
-| owner | 固定值 |
+```text
+Governance authority
+Authorization issuer
+Acceptance owner
+Finding adjudicator
+Final ratifier
+```
+
+- 這些 identity 可由使用者、ChatGPT、Claude-host、Codex-host 或其他明確控制流程持有；可同一 identity，也可分開；但必須在本次 authorization 中明示並可追溯。
+- external reviewer 不得自行取得 governance authority；active host 不因負責 implementation 就自動取得 acceptance 或 final-ratification authority。
+- routing 驗證必須 fail closed 拒絕：routing 檔內出現固定 authority owner（舊 schema v1 的 `authority` block）、或 packet 缺任何 governance identity 欄位。
+- provider 不得改寫 packet 的 authority fields；result 內的 governance identity 與 packet 不一致＝INVALID_OUTPUT。
+
+## Host modes（兩種正式 host）
+
+| host_mode | active host | host-local tiers | external reviewer |
+|---|---|---|---|
+| `claude_hosted` | Claude Desktop／Claude Code | Claude-native `scout`／`worker`／`executor`（既有 plugin agents，模型釘選不變） | `codex_cli` / `codex_read_only` |
+| `codex_hosted` | Codex Desktop | Codex-native `scout`／`worker`／`executor`（**adapter 尚未實作**：exact agent／model mapping 需先本機唯讀 feasibility） | `claude_cli` / `claude_read_only` |
+
+- 每個 Gate 只能有一個 active host（`one_active_host`）；host 偵測、fallback、session migration 一律不做。
+- active host 負責：讀 plan 與 authorization、repository-local feasibility、implementation、host 內部 tier 派工、acceptance commands、Git／test／diff evidence、回報；衝突、越界或缺 authority 時停止。
+- `codex_hosted` 的 `adapter_status = not_implemented`：在 Codex-host adapter 以本機 feasibility 證明前，任何 codex_hosted 的 active-host 執行請求必須 fail closed，不得假裝可用。shared runner 的 `claude_cli` reviewer transport 本身已存在且可測。
+
+## Host-local tiers（兩種 host 語意一致）
+
+| tier | 行為契約 |
 |---|---|
-| architecture_owner | chatgpt |
-| authoritative_plan_owner | chatgpt |
-| authorization_owner | chatgpt |
-| acceptance_owner | chatgpt |
-| final_adjudicator | chatgpt |
+| `scout` | 快速、低成本、優先 read-only；reconnaissance、inventory、定位與窄範圍 feasibility；不做跨模組高風險寫入；不持有 shared invariant 的 implementation ownership |
+| `worker` | 平衡成本與能力；一般已規格化 implementation；可持有單一 invariant／defect family；必須完成 authorized tests 與 closure evidence |
+| `executor` | 高能力／高成本；跨模組、契約、安全、持久化或高風險 implementation；承擔完整 invariant ownership 與 adversarial closure |
 
-權責層永遠不是可派工的執行角色；routing 驗證必須 fail closed 拒絕把這些 owner 當成執行目標。
+- tier 語意是 shared contract；exact model ID 是 host-local 設定。
+- **tier 不得因能力較高而取得額外 Git 或 governance authority**——tier 只改能力與成本，不改授權。
+- Claude-hosted mapping：`scout`→Haiku 檔位、`worker`→Sonnet 檔位、`executor`→Opus 檔位（SSOT＝`agents/*.md` frontmatter 的模型釘選）。
+- model mapping 可覆寫且 update-safe：每個 tier 的 `model_override`（`agent-routing.json` 內，預設 `null`＝用 agent 定義的釘選模型）屬 project-local 設定；`/orchestration:init-playbook` 對既有 routing 檔一律 no-overwrite，plugin 更新不得覆蓋。model 不存在＝fail closed，不自動替換。
+- 不得用單一全域 model 設定假裝完成三檔位能力；三層不得共用同一模型／同一 session 假裝 tier separation。
 
-### 執行角色（可路由）
+## External adversarial reviewer
 
-| role | 行為契約 |
-|---|---|
-| `feasibility_verifier` | 唯讀、fresh session；對照 authoritative plan commit 查證 repository-local 可行性；不得建 branch／worktree、不得改檔、不得開始實作；verdict 只有 PASS_FOR_IMPLEMENTATION_AUTHORIZATION／PLAN_CHANGE_REQUIRED／EVIDENCE_INSUFFICIENT 三種 |
-| `implementer` | 僅在另行授權後，於指定 worktree 內做單一 batch；只碰 allowed files；遇 forbidden-file dependency 或規格矛盾＝停止；不得 dispatch reviewer；未經另行授權不得 commit／push／PR／merge |
-| `adversarial_reviewer` | fresh session（絕不 resume implementation session）、唯讀；產出 candidate findings／observations／suggestions／evidence gaps；不修 code、不 dispatch implementer；finding 成立與否由 final_adjudicator 裁定 |
+reviewer 一律用 active host 的**對方** CLI：
 
-## Supported provider kinds（僅此三種）
+```text
+claude_hosted → codex_cli / codex_read_only
+codex_hosted  → claude_cli / claude_read_only
+```
+
+reviewer 契約：fresh session；read-only；不屬於 active host 的 tier chain；不修改 repository；不修 code；不啟動 active host 或下一角色；只產生 candidate findings／observations／suggestions／evidence gaps；不自動成為 finding adjudicator 或 final ratifier。review model 可依風險選對方 provider 的平衡／最高檔位，但必須由 packet 明示，不得自動升降級。
+
+**Claude CLI 不是 Claude-hosted 的 reviewer；Codex CLI 不是 Claude-hosted 的 implementer。** routing 驗證 fail closed 拒絕同 provider 家族自審。
+
+## Workflow roles（role_bindings）
+
+| role | binding | 行為契約 |
+|---|---|---|
+| `feasibility_verifier` | `active_host_local_tier` | 由 active host 以自家 tier（通常 scout／executor 唯讀）對照 authoritative plan commit 查證 repository-local 可行性；verdict 只有 PASS_FOR_IMPLEMENTATION_AUTHORIZATION／PLAN_CHANGE_REQUIRED／EVIDENCE_INSUFFICIENT 三種；**不走 external CLI** |
+| `implementer` | `active_host_local_tier` | 由 active host 以自家 worker／executor 於指定 worktree 做單一授權 batch；只碰 allowed files；遇 forbidden-file dependency 或規格矛盾＝停止；不得 dispatch reviewer；未經另行授權不得 commit／push／PR／merge |
+| `adversarial_reviewer` | `external_reviewer` | 獨立 reviewer authorization 後，經 bounded runner 派對方 CLI；fresh session、唯讀；findings 為 candidate，由 packet 明示的 finding adjudicator 裁定 |
+
+## Invocation paths
+
+| invocation_path | 語意 | 誰可用 |
+|---|---|---|
+| `active_host` | active host 自家 Task／agent 派工路徑（Claude-hosted＝Claude Code Task tool → scout／worker／executor） | feasibility_verifier、implementer |
+| `external_cli` | bounded runner 派對方 CLI（read-only reviewer） | adversarial_reviewer 專用 |
+| `headless_cli` | `codex_workspace_write` headless implementation——**非預設、明示 opt-in、需獨立授權**；不是 Desktop-hosted mode 的一部分，不得與 Codex Desktop host 混稱 | implementer（僅在 packet 明示 headless 授權時） |
+
+packet 的 `Invocation path` 欄必須明示；runner 對未明示或不合法的組合 fail closed。
+
+## Supported provider kinds
 
 | provider kind | 說明 |
 |---|---|
-| `claude_subagent` | 走既有 Claude Code Task 派工路徑，使用本 plugin 既有 agents（scout／worker／executor） |
-| `codex_cli` | 非互動 `codex exec`，經 bounded external-agent runner 呼叫 |
-| `claude_cli` | 非互動 `claude -p`，經 bounded external-agent runner 呼叫 |
+| `claude_native` | active Claude host 自家 tier（走 Claude Code Task 派工路徑，用本 plugin agents scout／worker／executor） |
+| `codex_native` | active Codex host 自家 tier（adapter 未實作；等 Codex-host feasibility） |
+| `codex_cli` | 非互動 `codex exec`，經 bounded external-agent runner 呼叫（reviewer 預設；headless implementation 為 opt-in） |
+| `claude_cli` | 非互動 `claude -p`，經 bounded external-agent runner 呼叫（codex_hosted 的 reviewer） |
 
-新增其他 provider kind 需要另一個 work package；本檔不得被改寫成宣稱支援任意 provider。
-
-> bounded external-agent runner（含 timeout、transcript、Git 證據、allowlist 驗證）由 orchestration codex enablement 的後續 batch 提供；在其落地前，CLI provider 的呼叫尚無現成的機械化包裝，不得假裝已存在。
+host-local tier 不得映射到 external CLI provider；新增其他 provider kind 需要另一個 work package。
 
 ## Supported profiles
 
 | profile | provider | 權限語意 |
 |---|---|---|
 | `codex_read_only` | codex_cli | read-only sandbox；非互動；無 approval escalation；repository mutation 由 runner 獨立偵測 |
-| `codex_workspace_write` | codex_cli | workspace-write sandbox（絕不 danger-full-access）；限授權 worktree；network 預設關閉，開啟需另行授權 |
+| `codex_workspace_write` | codex_cli | workspace-write sandbox（絕不 danger-full-access）；限授權 worktree；network 預設關閉；**只作 headless_cli_implementation opt-in 用** |
 | `claude_read_only` | claude_cli | fresh `claude -p`；plan／read-only permission mode；機械禁用 Bash／Edit／Write／NotebookEdit／Task／MCP／slash commands；不 resume |
-| `scout`／`worker`／`executor` | claude_subagent | 既有 plugin agents，語意見 `orchestration.md` 派誰表；模型釘選不變 |
+| `scout`／`worker`／`executor` | claude_native | 既有 plugin agents，語意見 `orchestration.md` 派誰表；模型釘選不變、可被 project-local shadowing／`model_override` 覆寫 |
 
 唯讀角色（feasibility_verifier、adversarial_reviewer）映射到可寫 profile＝routing 驗證失敗。
-
-## Default role mapping
-
-```text
-feasibility_verifier -> codex_cli / codex_read_only
-implementer          -> codex_cli / codex_workspace_write
-adversarial_reviewer -> claude_cli / claude_read_only
-```
-
-以 `agent-routing.json` 為 SSOT。可逆性要求：把 implementer 改回 `claude_subagent`（worker／executor），或 reviewer 改回 `codex_cli` read-only，只需改該檔＋工單，不得需要重寫 commands 或 playbook。
 
 ## Session separation
 
@@ -527,20 +575,32 @@ adversarial_reviewer -> claude_cli / claude_read_only
 ## Read-only／write boundaries
 
 - 唯讀角色：零 repository 寫入。prompt 措辭不是保證；由 runner 以 pre/post Git 證據（HEAD、index、tracked diff、untracked paths）獨立偵測，任何 delta＝違規。
-- implementer：只准動 packet 明列的 allowed files；changed paths 由 runner 事後獨立比對，forbidden 或未列入路徑＝違規。
+- implementer（含 headless）：只准動 packet 明列的 allowed files；changed paths 由 runner 事後獨立比對，forbidden 或未列入路徑＝違規。
 - 任何角色都不得使用 permission／sandbox bypass 旗標。
 
 ## Git authorization boundary
 
-- 外部 provider 的一切 Git 寫入（branch／worktree／commit／push／PR／merge）預設 NONE，需 authorization owner 逐項明文授權。
+- 一切 Git 寫入（branch／worktree／commit／push／PR／merge）預設 NONE，需 packet 明示的 authorization issuer 逐項明文授權。
 - commit 權可被單獨授權；push／PR／merge 各自需要再另行授權，不得由 commit 權推導。
-- implementer 不得自行授權下一 batch；reviewer 的啟動權不在 implementer。
+- implementer 不得自行授權下一 batch；reviewer 的啟動權不在 implementer——需要獨立的 reviewer authorization。
+- execution authorization ≠ Git authorization；tier 高低不改變 Git authorization。
 
 ## Task packet requirements
 
-每張外部派工單使用 `examples/task-packets/` 對應範本，common header 十六欄缺一不可：
+每張正式派工單使用 `examples/task-packets/` 對應範本，common header 缺一不可：
 
 ```text
+Governance authority
+Authorization issuer
+Acceptance owner
+Finding adjudicator
+Final ratifier
+Host mode
+Active execution host
+Host-local tier
+Host-local model
+Invocation path
+External reviewer provider/profile/model
 Role
 Provider/profile
 Explicit model
@@ -559,19 +619,23 @@ External-side-effect authorization
 Report schema
 ```
 
-回報一律對照 `examples/schemas/orchestration-result.schema.json` 的 common envelope；reviewer 結果必須分列 findings／observations／suggestions／evidence_gaps。
+回報一律對照 `examples/schemas/orchestration-result.schema.json`（schema v2 envelope）；result 必須能分辨 governance identity／host mode／execution host／host tier／role／provider／profile／model／invocation path／session ID。reviewer 結果必須分列 findings／observations／suggestions／evidence_gaps；active host implementation report 與 external reviewer result 共用 evidence vocabulary；active host 沒有 external runner manifest 時明確記 `not applicable`。
 
 ## Stop conditions（路由層）
 
-任一發生＝停止派工並回報 authorization owner：
+任一發生＝停止派工並回報 packet 明示的 authorization issuer：
 
-- routing 檔缺失、無效、或 authority owner 不是固定的 chatgpt 值；
-- 未知 role／provider／profile；
-- implementer 與 reviewer 解析到同一 provider（分離約束開啟時）；
+- routing 檔缺失、無效、或內含固定 governance owner（任何把 authority 寫死為 ChatGPT／Claude／Codex 的形狀）；
+- packet 缺 governance identity 或 host/tier identity 欄位；
+- host mode 未明示、一次多個 active host、或 host adapter 未實作（codex_hosted active-host 執行）；
+- 未知 role／provider／profile／tier／invocation path；
+- host-local tier 映射到 external CLI、或同 provider 家族自審（claude_hosted 配 claude_cli reviewer）；
 - 唯讀角色映射到可寫 profile；
+- headless_cli_implementation 被設為預設、或未經獨立授權被要求執行；
+- packet 的 `External-side-effect authorization` 缺欄、值非 `ALLOW_PROVIDER_INVOCATION`、歧義、或與 runner 的 `--external-authorization` 旗標不一致（由 runner 機械驗證後才 spawn，prompt 措辭不是授權；implementer 授權不涵蓋 reviewer，每次 external review 都要獨立 packet 授權）；
 - profile 所需 CLI 能力在本機版本不存在；
 - 派工單缺 common header 欄位；
-- 任何一方要求繞過 sandbox、approval 或 session separation。
+- 任何一方要求繞過 sandbox、approval、session separation 或自動 role chaining。
 ````
 
 ---
@@ -580,33 +644,86 @@ Report schema
 
 ````json
 {
-  "schema_version": 1,
-  "authority": {
-    "architecture_owner": "chatgpt",
-    "authoritative_plan_owner": "chatgpt",
-    "authorization_owner": "chatgpt",
-    "acceptance_owner": "chatgpt",
-    "final_adjudicator": "chatgpt"
+  "schema_version": 2,
+  "governance": {
+    "binding": "task_packet",
+    "explicit_identity_required": true,
+    "provider_agnostic": true
   },
-  "roles": {
-    "feasibility_verifier": {
-      "provider": "codex_cli",
-      "profile": "codex_read_only"
+  "host_modes": {
+    "claude_hosted": {
+      "active_host": "claude_code",
+      "adapter_status": "implemented",
+      "local_tiers": {
+        "scout": {
+          "provider": "claude_native",
+          "profile": "scout",
+          "model_override": null
+        },
+        "worker": {
+          "provider": "claude_native",
+          "profile": "worker",
+          "model_override": null
+        },
+        "executor": {
+          "provider": "claude_native",
+          "profile": "executor",
+          "model_override": null
+        }
+      },
+      "external_reviewer": {
+        "provider": "codex_cli",
+        "profile": "codex_read_only"
+      }
     },
-    "implementer": {
-      "provider": "codex_cli",
-      "profile": "codex_workspace_write"
-    },
-    "adversarial_reviewer": {
-      "provider": "claude_cli",
-      "profile": "claude_read_only"
+    "codex_hosted": {
+      "active_host": "codex_desktop",
+      "adapter_status": "not_implemented",
+      "local_tiers": {
+        "scout": {
+          "provider": "codex_native",
+          "profile": "pending_local_feasibility",
+          "model_override": null
+        },
+        "worker": {
+          "provider": "codex_native",
+          "profile": "pending_local_feasibility",
+          "model_override": null
+        },
+        "executor": {
+          "provider": "codex_native",
+          "profile": "pending_local_feasibility",
+          "model_override": null
+        }
+      },
+      "external_reviewer": {
+        "provider": "claude_cli",
+        "profile": "claude_read_only"
+      }
     }
   },
+  "role_bindings": {
+    "feasibility_verifier": "active_host_local_tier",
+    "implementer": "active_host_local_tier",
+    "adversarial_reviewer": "external_reviewer"
+  },
+  "headless_cli_implementation": {
+    "enabled_by_default": false,
+    "requires_separate_authorization": true,
+    "provider": "codex_cli",
+    "profile": "codex_workspace_write"
+  },
   "constraints": {
-    "require_distinct_implementer_and_reviewer_provider": true,
+    "one_active_host": true,
+    "tier_must_be_explicit": true,
+    "host_may_auto_dispatch_reviewer": false,
     "implementer_may_dispatch_reviewer": false,
     "reviewer_may_modify_repository": false,
-    "external_git_writes_require_separate_authorization": true
+    "reviewer_may_dispatch_host": false,
+    "external_git_writes_require_separate_authorization": true,
+    "automatic_fallback": false,
+    "automatic_retry": false,
+    "automatic_role_chaining": false
   }
 }
 ````

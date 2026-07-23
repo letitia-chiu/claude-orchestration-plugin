@@ -2,11 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/letitia-chiu/claude-orchestration-plugin/main/examples/schemas/orchestration-result.schema.json",
   "title": "Orchestration external-agent result",
-  "description": "Fixed result envelope for feasibility_verifier / implementer / adversarial_reviewer runs. This is the single canonical schema and it is written in the strict structured-output subset (every object declares additionalProperties: false and requires every property; no conditional keywords) so it can be passed verbatim to provider transports. Every role emits the same envelope: non-reviewer roles set findings/observations/suggestions/evidence_gaps to empty lists. Nullable scalars use the single representation type [string, null]. Role-specific semantic rules (three feasibility verdicts, empty changed_files for read-only roles, seven mandatory finding fields, Blocker/Major/Minor severity, empty reviewer collections for non-reviewer roles) are mechanically enforced by the runner's post-validation; an invalid result is classified INVALID_OUTPUT.",
+  "description": "Fixed result envelope (schema v2, dual-host) for feasibility_verifier / implementer / adversarial_reviewer runs. This is the single canonical schema and it is written in the strict structured-output subset (every object declares additionalProperties: false and requires every property; no conditional keywords) so it can be passed verbatim to provider transports. Every role emits the same envelope: non-reviewer roles set findings/observations/suggestions/evidence_gaps to empty lists. The envelope distinguishes governance identity, host mode, execution host, host tier, role, provider, profile, model, invocation path, and session ID. Nullable scalars use the single representation type [string, null]. Role-specific semantic rules (three feasibility verdicts, empty changed_files for read-only roles, governance identity echo, host/tier/invocation-path consistency, null host_tier for external invocations, seven mandatory finding fields, Blocker/Major/Minor severity, empty reviewer collections for non-reviewer roles) are mechanically enforced by the runner's post-validation; an invalid result is classified INVALID_OUTPUT.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
+    "governance_identity",
+    "host_mode",
+    "execution_host",
+    "host_tier",
+    "invocation_path",
     "role",
     "provider",
     "profile",
@@ -27,7 +32,28 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [1]
+      "enum": [2]
+    },
+    "governance_identity": {
+      "$ref": "#/$defs/governance_identity"
+    },
+    "host_mode": {
+      "type": "string",
+      "enum": ["claude_hosted", "codex_hosted"],
+      "description": "The single active host mode this run executed under."
+    },
+    "execution_host": {
+      "type": "string",
+      "description": "Active execution host identity (e.g. claude_code, codex_desktop)."
+    },
+    "host_tier": {
+      "type": ["string", "null"],
+      "description": "Host-local tier (scout/worker/executor) for active-host executions; must be null for external_cli and headless_cli invocations (an external reviewer never reports host-local tier execution)."
+    },
+    "invocation_path": {
+      "type": "string",
+      "enum": ["active_host", "external_cli", "headless_cli"],
+      "description": "How this run was invoked. headless_cli is a non-default, separately authorized opt-in."
     },
     "role": {
       "type": "string",
@@ -94,7 +120,7 @@
       "items": {
         "$ref": "#/$defs/finding"
       },
-      "description": "adversarial_reviewer only; other roles must send []. Candidate findings; only the final adjudicator (ChatGPT) may classify a candidate finding as established."
+      "description": "adversarial_reviewer only; other roles must send []. Candidate findings; only the packet-named finding adjudicator may classify a candidate finding as established."
     },
     "observations": {
       "type": "array",
@@ -119,6 +145,35 @@
     }
   },
   "$defs": {
+    "governance_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Governance identity echoed verbatim from the task packet. Never pinned to a product by the plugin; providers may not rewrite these fields (runner post-validation compares them against the invocation).",
+      "required": [
+        "governance_authority",
+        "authorization_issuer",
+        "acceptance_owner",
+        "finding_adjudicator",
+        "final_ratifier"
+      ],
+      "properties": {
+        "governance_authority": {
+          "type": "string"
+        },
+        "authorization_issuer": {
+          "type": "string"
+        },
+        "acceptance_owner": {
+          "type": "string"
+        },
+        "finding_adjudicator": {
+          "type": "string"
+        },
+        "final_ratifier": {
+          "type": "string"
+        }
+      }
+    },
     "test_entry": {
       "type": "object",
       "additionalProperties": false,

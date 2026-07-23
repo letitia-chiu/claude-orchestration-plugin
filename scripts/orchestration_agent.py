@@ -3,8 +3,21 @@
 
 This runner is a narrow process-safety wrapper. Per invocation it:
 
-- validates the project routing file (docs/playbook/agent-routing.json);
-- validates role / provider / profile compatibility (fail closed);
+- validates the project routing file (docs/playbook/agent-routing.json, schema v2:
+  governance-neutral, host-aware, tier-aware — governance identity comes from
+  the task packet, never from the routing file);
+- requires an explicit governance identity, host mode, and invocation path
+  (fail closed on any missing identity field);
+- resolves the role through the dual-host contract: feasibility_verifier and
+  implementer belong to the active host's local tiers (this runner refuses to
+  emulate the active host); adversarial_reviewer resolves to the opposing
+  provider's read-only CLI; headless_cli implementation is a non-default,
+  separately authorized opt-in;
+- mechanically enforces the task packet's External-side-effect authorization
+  before any provider spawn: the packet must carry exactly one unambiguous
+  ALLOW_PROVIDER_INVOCATION value AND the caller must pass the matching
+  --external-authorization flag; missing, unknown, ambiguous, or mismatched
+  authorization fails closed with no child process started;
 - starts exactly one external CLI process (codex_cli or claude_cli);
 - enforces a wall-clock timeout against the whole child process group;
 - captures stdout and stderr separately, unmerged;
@@ -29,6 +42,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -55,27 +69,52 @@ TRANSCRIPT_INCOMPLETE = "TRANSCRIPT_INCOMPLETE"
 CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
 CAPABILITY_UNAVAILABLE = "CAPABILITY_UNAVAILABLE"
 
-FIXED_AUTHORITY = {
-    "architecture_owner": "chatgpt",
-    "authoritative_plan_owner": "chatgpt",
-    "authorization_owner": "chatgpt",
-    "acceptance_owner": "chatgpt",
-    "final_adjudicator": "chatgpt",
-}
-
 SUPPORTED_ROLES = ("feasibility_verifier", "implementer", "adversarial_reviewer")
 READ_ONLY_ROLES = frozenset({"feasibility_verifier", "adversarial_reviewer"})
-PROVIDER_KINDS = frozenset({"claude_subagent", "codex_cli", "claude_cli"})
 EXTERNAL_PROVIDERS = frozenset({"codex_cli", "claude_cli"})
 
-# profile -> (provider kind, write-capable)
+HOST_MODES = ("claude_hosted", "codex_hosted")
+INVOCATION_PATHS = ("active_host", "external_cli", "headless_cli")
+HOST_TIERS = ("scout", "worker", "executor")
+GOVERNANCE_IDENTITY_FIELDS = (
+    "governance_authority",
+    "authorization_issuer",
+    "acceptance_owner",
+    "finding_adjudicator",
+    "final_ratifier",
+)
+# Native provider family per host mode: the external reviewer must come from
+# the opposing family (a host never reviews itself with its own provider).
+HOST_NATIVE_CLI = {"claude_hosted": "claude_cli", "codex_hosted": "codex_cli"}
+ROLE_BINDINGS_REQUIRED = {
+    "feasibility_verifier": "active_host_local_tier",
+    "implementer": "active_host_local_tier",
+    "adversarial_reviewer": "external_reviewer",
+}
+CONSTRAINTS_REQUIRED = {
+    "one_active_host": True,
+    "tier_must_be_explicit": True,
+    "host_may_auto_dispatch_reviewer": False,
+    "implementer_may_dispatch_reviewer": False,
+    "reviewer_may_modify_repository": False,
+    "reviewer_may_dispatch_host": False,
+    "external_git_writes_require_separate_authorization": True,
+    "automatic_fallback": False,
+    "automatic_retry": False,
+    "automatic_role_chaining": False,
+}
+
+# External-side-effect authorization: the task packet field the runner parses
+# mechanically before any provider spawn. Prompt wording is not a guarantee;
+# the packet value and the caller flag must both equal this token.
+EXTERNAL_AUTH_FIELD = "External-side-effect authorization"
+ALLOW_PROVIDER_INVOCATION = "ALLOW_PROVIDER_INVOCATION"
+
+# External CLI profile -> (provider kind, write-capable)
 PROFILES = {
     "codex_read_only": ("codex_cli", False),
     "codex_workspace_write": ("codex_cli", True),
     "claude_read_only": ("claude_cli", False),
-    "scout": ("claude_subagent", False),
-    "worker": ("claude_subagent", True),
-    "executor": ("claude_subagent", True),
 }
 
 # The only Git subcommands this runner may ever execute (evidence collection).
@@ -83,6 +122,11 @@ GIT_READ_ONLY_SUBCOMMANDS = frozenset({"rev-parse", "status", "diff", "ls-files"
 
 ENVELOPE_REQUIRED = (
     "schema_version",
+    "governance_identity",
+    "host_mode",
+    "execution_host",
+    "host_tier",
+    "invocation_path",
     "role",
     "provider",
     "profile",
@@ -300,74 +344,219 @@ def load_routing(path):
 
 
 def validate_routing(routing):
-    """Return a list of configuration errors (empty when routing is valid)."""
+    """Return a list of configuration errors (empty when routing is valid).
+
+    Schema v2 is governance-neutral: the routing file must never pin a
+    governance owner to a product; identity always comes from the task packet.
+    """
     errors = []
-    if routing.get("schema_version") != 1:
-        errors.append("schema_version must be 1")
-    authority = routing.get("authority")
-    if authority != FIXED_AUTHORITY:
+    if routing.get("schema_version") != 2:
+        errors.append("schema_version must be 2")
+    if "authority" in routing:
         errors.append(
-            "authority ownership must be exactly the fixed ChatGPT values; got %r" % (authority,)
+            "governance authority must not be pinned in the routing file "
+            "(schema v1 'authority' block found); governance identity comes "
+            "from each task packet"
         )
-    roles = routing.get("roles")
-    if not isinstance(roles, dict):
-        errors.append("roles must be an object")
-        roles = {}
-    for role_name, mapping in roles.items():
-        if role_name not in SUPPORTED_ROLES:
-            errors.append("unknown role: %s" % role_name)
+    governance = routing.get("governance")
+    if not isinstance(governance, dict):
+        errors.append("governance must be an object")
+    else:
+        if governance.get("binding") != "task_packet":
+            errors.append("governance.binding must be 'task_packet'")
+        if governance.get("explicit_identity_required") is not True:
+            errors.append("governance.explicit_identity_required must be true")
+        if governance.get("provider_agnostic") is not True:
+            errors.append("governance.provider_agnostic must be true")
+
+    host_modes = routing.get("host_modes")
+    if not isinstance(host_modes, dict):
+        errors.append("host_modes must be an object")
+        host_modes = {}
+    if set(host_modes) != set(HOST_MODES):
+        errors.append(
+            "host_modes must define exactly %s; got %s"
+            % (sorted(HOST_MODES), sorted(host_modes))
+        )
+    for mode_name, mode in host_modes.items():
+        if mode_name not in HOST_MODES:
             continue
-        if not isinstance(mapping, dict):
-            errors.append("role %s mapping must be an object" % role_name)
+        if not isinstance(mode, dict):
+            errors.append("host mode %s must be an object" % mode_name)
             continue
-        provider = mapping.get("provider")
-        profile = mapping.get("profile")
-        if provider not in PROVIDER_KINDS:
-            errors.append("role %s: unknown provider %r" % (role_name, provider))
-            continue
-        if profile not in PROFILES:
-            errors.append("role %s: unknown profile %r" % (role_name, profile))
-            continue
-        profile_provider, write_capable = PROFILES[profile]
-        if profile_provider != provider:
+        active_host = mode.get("active_host")
+        if not isinstance(active_host, str) or not active_host:
+            errors.append("host mode %s: active_host must be a non-empty string" % mode_name)
+        if mode.get("adapter_status") not in ("implemented", "not_implemented"):
             errors.append(
-                "role %s: profile %s belongs to provider %s, not %s"
-                % (role_name, profile, profile_provider, provider)
+                "host mode %s: adapter_status must be implemented/not_implemented" % mode_name
             )
-        if role_name in READ_ONLY_ROLES and write_capable:
+        tiers = mode.get("local_tiers")
+        if not isinstance(tiers, dict) or set(tiers) != set(HOST_TIERS):
             errors.append(
-                "role %s is read-only but profile %s is write-capable" % (role_name, profile)
+                "host mode %s: local_tiers must define exactly scout/worker/executor" % mode_name
             )
+            tiers = {}
+        for tier_name, tier in tiers.items():
+            if not isinstance(tier, dict):
+                errors.append("host mode %s tier %s must be an object" % (mode_name, tier_name))
+                continue
+            tier_provider = tier.get("provider")
+            if not isinstance(tier_provider, str) or not tier_provider:
+                errors.append(
+                    "host mode %s tier %s: provider must be a non-empty string"
+                    % (mode_name, tier_name)
+                )
+            elif tier_provider in EXTERNAL_PROVIDERS:
+                errors.append(
+                    "host mode %s tier %s: a host-local tier must never map to an "
+                    "external CLI provider (%s)" % (mode_name, tier_name, tier_provider)
+                )
+            if not isinstance(tier.get("profile"), str) or not tier.get("profile"):
+                errors.append(
+                    "host mode %s tier %s: profile must be a non-empty string"
+                    % (mode_name, tier_name)
+                )
+            override = tier.get("model_override", None)
+            if override is not None and (not isinstance(override, str) or not override):
+                errors.append(
+                    "host mode %s tier %s: model_override must be a non-empty string or null"
+                    % (mode_name, tier_name)
+                )
+        reviewer = mode.get("external_reviewer")
+        if not isinstance(reviewer, dict):
+            errors.append("host mode %s: external_reviewer must be an object" % mode_name)
+            continue
+        rev_provider = reviewer.get("provider")
+        rev_profile = reviewer.get("profile")
+        if rev_provider not in EXTERNAL_PROVIDERS:
+            errors.append(
+                "host mode %s: unknown external reviewer provider %r" % (mode_name, rev_provider)
+            )
+            continue
+        if rev_provider == HOST_NATIVE_CLI.get(mode_name):
+            errors.append(
+                "host mode %s: external reviewer must come from the opposing provider "
+                "family, not %s (a host never reviews itself)" % (mode_name, rev_provider)
+            )
+        if rev_profile not in PROFILES:
+            errors.append(
+                "host mode %s: unknown external reviewer profile %r" % (mode_name, rev_profile)
+            )
+            continue
+        profile_provider, write_capable = PROFILES[rev_profile]
+        if profile_provider != rev_provider:
+            errors.append(
+                "host mode %s: reviewer profile %s belongs to provider %s, not %s"
+                % (mode_name, rev_profile, profile_provider, rev_provider)
+            )
+        if write_capable:
+            errors.append(
+                "host mode %s: external reviewer is read-only but profile %s is "
+                "write-capable" % (mode_name, rev_profile)
+            )
+
+    if routing.get("role_bindings") != ROLE_BINDINGS_REQUIRED:
+        errors.append(
+            "role_bindings must be exactly %r (feasibility/implementation belong to "
+            "the active host; only adversarial_reviewer goes external)"
+            % (ROLE_BINDINGS_REQUIRED,)
+        )
+
+    headless = routing.get("headless_cli_implementation")
+    if not isinstance(headless, dict):
+        errors.append("headless_cli_implementation must be an object")
+    else:
+        if headless.get("enabled_by_default") is not False:
+            errors.append(
+                "headless_cli_implementation.enabled_by_default must be false "
+                "(headless implementation is never the default)"
+            )
+        if headless.get("requires_separate_authorization") is not True:
+            errors.append(
+                "headless_cli_implementation.requires_separate_authorization must be true"
+            )
+        h_provider = headless.get("provider")
+        h_profile = headless.get("profile")
+        if h_provider not in EXTERNAL_PROVIDERS:
+            errors.append("headless_cli_implementation: unknown provider %r" % (h_provider,))
+        elif h_profile not in PROFILES or PROFILES[h_profile][0] != h_provider:
+            errors.append(
+                "headless_cli_implementation: profile %r does not belong to provider %r"
+                % (h_profile, h_provider)
+            )
+
     constraints = routing.get("constraints")
     if not isinstance(constraints, dict):
         errors.append("constraints must be an object")
         constraints = {}
-    if constraints.get("implementer_may_dispatch_reviewer") is not False:
-        errors.append("implementer_may_dispatch_reviewer must be false")
-    if constraints.get("reviewer_may_modify_repository") is not False:
-        errors.append("reviewer_may_modify_repository must be false")
-    if constraints.get("external_git_writes_require_separate_authorization") is not True:
-        errors.append("external_git_writes_require_separate_authorization must be true")
-    if constraints.get("require_distinct_implementer_and_reviewer_provider") is True:
-        impl = roles.get("implementer") if isinstance(roles, dict) else None
-        rev = roles.get("adversarial_reviewer") if isinstance(roles, dict) else None
-        if (
-            isinstance(impl, dict)
-            and isinstance(rev, dict)
-            and impl.get("provider") == rev.get("provider")
-        ):
-            errors.append(
-                "implementer and adversarial_reviewer resolve to the same provider (%s)"
-                % impl.get("provider")
-            )
+    for key, expected in CONSTRAINTS_REQUIRED.items():
+        if constraints.get(key) is not expected:
+            errors.append("constraints.%s must be %s" % (key, json.dumps(expected)))
     return errors
 
 
-def resolve_role(routing, role):
-    mapping = routing.get("roles", {}).get(role)
-    if not isinstance(mapping, dict):
-        raise ConfigError("routing file does not map role %s" % role)
-    return mapping["provider"], mapping["profile"]
+def parse_packet_external_authorization(packet_text):
+    """Mechanically extract the External-side-effect authorization value.
+
+    Scans every packet line containing the field name and takes the first
+    value token after it (table cell or colon form). Returns (value, errors):
+    value is the single unambiguous token, or None. Zero occurrences is a
+    missing field; conflicting tokens are ambiguous; both fail closed at the
+    caller. This parser never guesses: prompt prose is not authorization.
+    """
+    tokens = []
+    for line in packet_text.splitlines():
+        if EXTERNAL_AUTH_FIELD not in line:
+            continue
+        remainder = line.split(EXTERNAL_AUTH_FIELD, 1)[1]
+        remainder = remainder.strip().lstrip(":").lstrip("|").strip()
+        if remainder.endswith("|"):
+            remainder = remainder[:-1].strip()
+        if not remainder:
+            # A bare field name with no value on the same line is a malformed
+            # authorization: record it as an explicit empty token (ambiguous
+            # with any real value, missing when alone).
+            tokens.append("")
+            continue
+        tokens.append(re.split(r"[\s（(]", remainder, maxsplit=1)[0])
+    unique = sorted(set(tokens))
+    if not unique:
+        return None, ["task packet does not carry the %r field" % EXTERNAL_AUTH_FIELD]
+    if len(unique) > 1:
+        return None, [
+            "task packet %r is ambiguous: conflicting values %s"
+            % (EXTERNAL_AUTH_FIELD, unique)
+        ]
+    if unique[0] == "":
+        return None, ["task packet %r carries no value" % EXTERNAL_AUTH_FIELD]
+    return unique[0], []
+
+
+def resolve_host_mode(routing, host_mode):
+    if host_mode not in HOST_MODES:
+        raise ConfigError(
+            "host mode must be explicit and one of %s; got %r"
+            % (sorted(HOST_MODES), host_mode)
+        )
+    mode = routing.get("host_modes", {}).get(host_mode)
+    if not isinstance(mode, dict):
+        raise ConfigError("routing file does not define host mode %s" % host_mode)
+    return mode
+
+
+def resolve_external_reviewer(routing, host_mode):
+    reviewer = resolve_host_mode(routing, host_mode)["external_reviewer"]
+    return reviewer["provider"], reviewer["profile"]
+
+
+def resolve_tier_model(routing, host_mode, tier):
+    """Return the project-local model override for a host tier (None = use the
+    host adapter's pinned default, e.g. the agent frontmatter model)."""
+    tiers = resolve_host_mode(routing, host_mode)["local_tiers"]
+    if tier not in tiers:
+        raise ConfigError("host mode %s does not define tier %s" % (host_mode, tier))
+    return tiers[tier].get("model_override")
 
 
 # ---------------------------------------------------------------------------
@@ -564,11 +753,14 @@ def _extract_claude_result(stdout_path):
     return None, "result event carries no structured output object"
 
 
-def validate_result(result, role, provider, profile, model):
-    """Standard-library validation of the fixed result envelope.
+def validate_result(result, role, provider, profile, model, identity=None):
+    """Standard-library validation of the fixed result envelope (schema v2).
 
     The transport schema is the strict-subset canonical schema; the
     role-specific semantics removed from the schema are enforced here.
+    `identity` (when supplied) is the invocation-side identity dict with
+    host_mode / execution_host / invocation_path / governance_identity; a
+    provider may never rewrite these fields.
     """
     errors = []
     if not isinstance(result, dict):
@@ -578,8 +770,8 @@ def validate_result(result, role, provider, profile, model):
             errors.append("missing required field: %s" % field)
     if errors:
         return errors
-    if result["schema_version"] != 1:
-        errors.append("schema_version must be 1")
+    if result["schema_version"] != 2:
+        errors.append("schema_version must be 2")
     for field, expected in (
         ("role", role),
         ("provider", provider),
@@ -589,6 +781,42 @@ def validate_result(result, role, provider, profile, model):
         if result[field] != expected:
             errors.append(
                 "%s mismatch: invocation=%s result=%r" % (field, expected, result[field])
+            )
+    gov = result["governance_identity"]
+    if not isinstance(gov, dict) or set(gov) != set(GOVERNANCE_IDENTITY_FIELDS):
+        errors.append(
+            "governance_identity must be an object with exactly the fields %s"
+            % (sorted(GOVERNANCE_IDENTITY_FIELDS),)
+        )
+    else:
+        for field in GOVERNANCE_IDENTITY_FIELDS:
+            if not isinstance(gov[field], str) or not gov[field]:
+                errors.append("governance_identity.%s must be a non-empty string" % field)
+    if result["host_mode"] not in HOST_MODES:
+        errors.append("host_mode must be one of %s" % sorted(HOST_MODES))
+    if not isinstance(result["execution_host"], str) or not result["execution_host"]:
+        errors.append("execution_host must be a non-empty string")
+    if result["invocation_path"] not in INVOCATION_PATHS:
+        errors.append("invocation_path must be one of %s" % sorted(INVOCATION_PATHS))
+    if result["invocation_path"] in ("external_cli", "headless_cli"):
+        if result["host_tier"] is not None:
+            errors.append(
+                "host_tier must be null for %s invocations (an external invocation "
+                "never reports host-local tier execution)" % result["invocation_path"]
+            )
+    elif result["host_tier"] is not None and result["host_tier"] not in HOST_TIERS:
+        errors.append("host_tier must be null or one of %s" % sorted(HOST_TIERS))
+    if identity is not None:
+        for field in ("host_mode", "execution_host", "invocation_path"):
+            if result[field] != identity[field]:
+                errors.append(
+                    "%s mismatch: invocation=%s result=%r"
+                    % (field, identity[field], result[field])
+                )
+        if isinstance(gov, dict) and gov != identity["governance_identity"]:
+            errors.append(
+                "governance_identity was rewritten by the provider; it must echo "
+                "the task packet identity verbatim"
             )
     for field in ("model", "verdict", "summary"):
         if not isinstance(result[field], str) or not result[field]:
@@ -773,8 +1001,17 @@ def _changed_paths_from_entries(entries):
 
 
 def cmd_run(args):
+    governance_identity = {
+        field: getattr(args, field, None) for field in GOVERNANCE_IDENTITY_FIELDS
+    }
     invocation = {
         "role": args.role,
+        "host_mode": args.host_mode,
+        "invocation_path": args.invocation_path,
+        "governance_identity": governance_identity,
+        "external_side_effect_authorization": None,
+        "execution_host": None,
+        "host_adapter_status": None,
         "provider": None,
         "profile": None,
         "model": args.model,
@@ -849,13 +1086,33 @@ def cmd_run(args):
                 "schema strict-subset preflight failed: " + "; ".join(schema_errors)
             )
 
+        # Governance identity is packet-supplied and mandatory (fail closed).
+        missing_identity = sorted(
+            field
+            for field, value in governance_identity.items()
+            if not isinstance(value, str) or not value
+        )
+        if missing_identity:
+            raise ConfigError(
+                "governance identity missing or empty (fail closed): %s; the task "
+                "packet must state every governance identity field explicitly"
+                % ", ".join(missing_identity)
+            )
+
         routing = load_routing(args.routing_file)
         routing_errors = validate_routing(routing)
         if routing_errors:
             raise ConfigError("routing validation failed: " + "; ".join(routing_errors))
-        provider, profile = resolve_role(routing, args.role)
-        invocation["provider"] = provider
-        invocation["profile"] = profile
+
+        host_conf = resolve_host_mode(routing, args.host_mode)
+        invocation["execution_host"] = host_conf["active_host"]
+        invocation["host_adapter_status"] = host_conf["adapter_status"]
+
+        if args.invocation_path not in INVOCATION_PATHS:
+            raise ConfigError(
+                "invocation path must be explicit and one of %s; got %r"
+                % (sorted(INVOCATION_PATHS), args.invocation_path)
+            )
 
         # Session boundary rules. One invocation executes exactly one role;
         # nothing here ever chains, retries, falls back, or auto-resumes.
@@ -874,14 +1131,100 @@ def cmd_run(args):
                 "requires the recorded-session metadata contract)",
             )
 
-        if provider == "claude_subagent":
+        # Dual-host role/path matrix. Feasibility and implementation belong to
+        # the active host; only the adversarial reviewer (and the separately
+        # authorized headless implementer) ever reach an external CLI here.
+        if args.role == "adversarial_reviewer":
+            if args.invocation_path != "external_cli":
+                raise ConfigError(
+                    "adversarial_reviewer runs only via invocation path external_cli"
+                )
+            provider, profile = resolve_external_reviewer(routing, args.host_mode)
+        elif args.role == "feasibility_verifier":
+            if args.invocation_path != "active_host":
+                raise ConfigError(
+                    "feasibility_verifier is an active-host responsibility "
+                    "(invocation path active_host); external CLI feasibility is "
+                    "not part of the dual-host contract"
+                )
+            if host_conf["adapter_status"] != "implemented":
+                return finish(
+                    CAPABILITY_UNAVAILABLE,
+                    "host mode %s adapter is not implemented (fail closed); "
+                    "Codex-host capability requires local read-only feasibility "
+                    "evidence first" % args.host_mode,
+                )
             return finish(
                 CAPABILITY_UNAVAILABLE,
-                "provider claude_subagent must be dispatched through the Claude Code "
-                "Task path; this external runner does not emulate it",
+                "feasibility_verifier runs on the active host (%s) through its own "
+                "host-local tier dispatch path; this external runner does not "
+                "emulate the active host" % host_conf["active_host"],
             )
+        elif args.role == "implementer":
+            if args.invocation_path == "active_host":
+                if host_conf["adapter_status"] != "implemented":
+                    return finish(
+                        CAPABILITY_UNAVAILABLE,
+                        "host mode %s adapter is not implemented (fail closed); "
+                        "Codex-host capability requires local read-only feasibility "
+                        "evidence first" % args.host_mode,
+                    )
+                return finish(
+                    CAPABILITY_UNAVAILABLE,
+                    "implementer runs on the active host (%s) through its own "
+                    "host-local worker/executor tier; headless CLI implementation "
+                    "is a non-default opt-in requiring --invocation-path "
+                    "headless_cli plus separate authorization" % host_conf["active_host"],
+                )
+            if args.invocation_path != "headless_cli":
+                raise ConfigError(
+                    "implementer accepts only invocation paths active_host (default "
+                    "contract) or headless_cli (separately authorized opt-in); "
+                    "external_cli is not a valid implementer path"
+                )
+            headless = routing["headless_cli_implementation"]
+            provider, profile = headless["provider"], headless["profile"]
+        else:
+            raise ConfigError("unsupported role: %s" % args.role)
+
+        invocation["provider"] = provider
+        invocation["profile"] = profile
         if provider not in EXTERNAL_PROVIDERS:
             raise ConfigError("unsupported external provider: %s" % provider)
+
+        # F-X2: mechanical external-side-effect authorization preflight.
+        # Prompt/command wording is never authorization; the packet field and
+        # the caller flag must both carry ALLOW_PROVIDER_INVOCATION and agree,
+        # per invocation — an implementer authorization never covers a
+        # reviewer invocation, and vice versa. Any failure here happens before
+        # the child process exists (no quota, no side effect).
+        packet_text = task_file.read_text(encoding="utf-8", errors="replace")
+        packet_auth, auth_errors = parse_packet_external_authorization(packet_text)
+        if auth_errors:
+            raise ConfigError(
+                "external-side-effect authorization preflight failed: "
+                + "; ".join(auth_errors)
+            )
+        flag_auth = args.external_authorization
+        if flag_auth is None:
+            raise ConfigError(
+                "external-side-effect authorization must also be passed "
+                "explicitly via --external-authorization and match the task "
+                "packet (fail closed; a caller-side value alone is never "
+                "sufficient, and a packet value alone is never assumed)"
+            )
+        if flag_auth != packet_auth:
+            raise ConfigError(
+                "external-side-effect authorization mismatch: packet=%r flag=%r "
+                "(fail closed; provider not spawned)" % (packet_auth, flag_auth)
+            )
+        if packet_auth != ALLOW_PROVIDER_INVOCATION:
+            raise ConfigError(
+                "external provider invocation is not authorized: packet carries "
+                "%r, expected %s; provider not spawned"
+                % (packet_auth, ALLOW_PROVIDER_INVOCATION)
+            )
+        invocation["external_side_effect_authorization"] = packet_auth
 
         # Copy controller inputs into the bundle.
         shutil.copyfile(task_file, artifact_dir / "task.md")
@@ -1022,7 +1365,19 @@ def cmd_run(args):
         )
     if result is None:
         return finish(INVALID_OUTPUT, result_error or "final structured result missing")
-    validation_errors = validate_result(result, args.role, provider, profile, args.model)
+    validation_errors = validate_result(
+        result,
+        args.role,
+        provider,
+        profile,
+        args.model,
+        identity={
+            "host_mode": args.host_mode,
+            "execution_host": invocation["execution_host"],
+            "invocation_path": args.invocation_path,
+            "governance_identity": governance_identity,
+        },
+    )
     if validation_errors:
         return finish(INVALID_OUTPUT, "result validation failed: " + "; ".join(validation_errors))
     outcome = map_verdict_outcome(result)
@@ -1054,6 +1409,21 @@ def build_parser():
     run_parser = sub.add_parser("run", help="run one external-agent invocation")
     run_parser.add_argument("--routing-file", required=True)
     run_parser.add_argument("--role", required=True, choices=SUPPORTED_ROLES)
+    # Host/tier and governance identity are validated fail-closed inside
+    # cmd_run (CONFIGURATION_ERROR with evidence), not by argparse.
+    run_parser.add_argument("--host-mode")
+    run_parser.add_argument("--invocation-path")
+    run_parser.add_argument("--governance-authority", dest="governance_authority")
+    run_parser.add_argument("--authorization-issuer", dest="authorization_issuer")
+    run_parser.add_argument("--acceptance-owner", dest="acceptance_owner")
+    run_parser.add_argument("--finding-adjudicator", dest="finding_adjudicator")
+    run_parser.add_argument("--final-ratifier", dest="final_ratifier")
+    run_parser.add_argument(
+        "--external-authorization",
+        dest="external_authorization",
+        help="must equal the task packet's External-side-effect authorization "
+        "value; both are required before any provider spawn (fail closed)",
+    )
     run_parser.add_argument("--workdir", required=True)
     run_parser.add_argument("--task-file", required=True)
     run_parser.add_argument("--artifact-dir", required=True)
