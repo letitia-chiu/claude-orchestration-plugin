@@ -24,7 +24,7 @@
 | 大案子執行中 | `implementation-notes-template.md` |
 | 收尾/交班/換機 | `handoff-template.md`＋`review-rubric.md` §完成定義 |
 
-> 註：`agent-routing.json`（schema v2）是 governance-neutral、host-aware、tier-aware 路由的 SSOT：governance identity 由每次 task packet 明示；host mode（claude_hosted／codex_hosted）一次一個；feasibility／implementation 走 active host 自家 scout／worker／executor；external reviewer 用對方 CLI（經 bounded runner：timeout、transcript、Git 證據、allowlist 驗證）。Codex-host adapter 尚未實作＝fail closed；headless CLI implementation 為非預設 opt-in。
+> 註：`agent-routing.json`（schema v2）是 governance-neutral、host-aware、tier-aware 路由的 SSOT：governance identity 由每次 task packet 明示；host mode（claude_hosted／codex_hosted）一次一個；兩個 adapter 均已實作，feasibility／implementation 走 active host 自家 scout／worker／executor；external reviewer 用對方 CLI（經 bounded runner：timeout、transcript、Git 證據、allowlist 驗證）。Codex-host surface 必須先用 `scripts/init_codex_host.py --target /absolute/path/to/target-repository` materialize 到 target Git repository；headless CLI implementation 為非預設 opt-in。
 
 ## 日常工作流
 

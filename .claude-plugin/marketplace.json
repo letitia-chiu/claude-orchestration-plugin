@@ -1,6 +1,6 @@
 {
   "name": "orchestration-marketplace",
-  "description": "A cross-project set of slash commands, subagents, and audit skills for a role-first orchestrate-and-delegate workflow: the main session keeps authoritative planning, authorization, and acceptance; workflow roles are routed via an evidence-oriented routing file to bounded Claude subagent, Codex CLI, or Claude CLI execution paths.",
+  "description": "Governance-neutral dual-host orchestration for Claude Desktop, Claude Code, and Codex Desktop, with host-native scout/worker/executor tiers and separately authorized reciprocal read-only CLI review.",
   "owner": {
     "name": "letitia-chiu"
   },
@@ -8,7 +8,7 @@
     {
       "name": "orchestration",
       "source": "./",
-      "description": "A cross-project set of slash commands, subagents, and audit skills for a role-first orchestrate-and-delegate workflow: the main session keeps authoritative planning, authorization, and acceptance; workflow roles are routed via an evidence-oriented routing file to bounded Claude subagent, Codex CLI, or Claude CLI execution paths."
+      "description": "Governance-neutral dual-host orchestration for Claude Desktop, Claude Code, and Codex Desktop, with host-native scout/worker/executor tiers and separately authorized reciprocal read-only CLI review."
     }
   ]
 }

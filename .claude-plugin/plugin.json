@@ -1,12 +1,12 @@
 {
   "name": "orchestration",
   "displayName": "Orchestration Workflow",
-  "description": "A cross-project set of slash commands, subagents, and audit skills for a role-first orchestrate-and-delegate workflow: the main session keeps authoritative planning, authorization, and acceptance; workflow roles are routed via an evidence-oriented routing file to bounded Claude subagent, Codex CLI, or Claude CLI execution paths.",
-  "version": "0.6.0",
+  "description": "Governance-neutral dual-host orchestration for Claude Desktop, Claude Code, and Codex Desktop, with host-native scout/worker/executor tiers and separately authorized reciprocal read-only CLI review.",
+  "version": "0.7.0",
   "author": {
     "name": "letitia-chiu"
   },
-  "keywords": ["orchestration", "subagents", "workflow", "runtime-contracts", "role-routing", "codex", "claude", "agent-safety"],
+  "keywords": ["orchestration", "subagents", "workflow", "runtime-contracts", "role-routing", "codex", "claude", "agent-safety", "dual-host", "codex-desktop", "claude-code", "adversarial-review", "agent-routing"],
   "license": "MIT",
   "repository": "https://github.com/letitia-chiu/claude-orchestration-plugin",
   "homepage": "https://github.com/letitia-chiu/claude-orchestration-plugin#readme"

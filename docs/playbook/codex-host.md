@@ -38,6 +38,29 @@ feasibility. The adapter does not install or modify global configuration, a
 daemon, or a hook, and it never automatically allows external provider
 invocation.
 
+## Target-project installation
+
+The adapter files in the plugin checkout are not automatically installed in
+another repository. From the plugin root, materialize the fixed 21-file
+inventory into an explicit target Git root:
+
+```bash
+python3 scripts/init_codex_host.py \
+  --target /absolute/path/to/target-repository
+python3 scripts/init_codex_host.py \
+  --target /absolute/path/to/target-repository \
+  --check
+```
+
+The target must exist, be an absolute path, and resolve to a Git repository.
+Installation is transactional and no-overwrite: missing files are copied,
+identical files are not rewritten, and any different file aborts the entire run
+before writes. A different `AGENTS.md` requires a repository-owner manual
+merge. Updates preserve project-local customization by reporting a conflict
+instead of overwriting it. The materializer does not write global
+configuration, invoke a provider, or perform Git writes. It is not a native
+Codex Plugin Directory package.
+
 ## Risk-to-tier matrix
 
 | Risk / task shape | Tier | Default model | Reasoning | Sandbox | Ownership |
