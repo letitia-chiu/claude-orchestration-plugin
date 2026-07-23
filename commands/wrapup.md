@@ -1,5 +1,5 @@
 ---
-description: "Wrap-up ritual: verification battery → known-failures check → handoff (snapshot + commit)"
+description: "Wrap-up ritual: verification battery → known-failures check → provider evidence → handoff (snapshot + commit)"
 ---
 > **Language — always respond in the user's language.** This file is written in English for maintainability. English is the language of these *instructions*, not of your *output*. Converse with, question, and report to the user in the same language they write to you in: Traditional Chinese in → Traditional Chinese out; Simplified Chinese → Simplified Chinese; Japanese → Japanese; English → English. Never switch to English just because this file happens to be in English.
 
@@ -12,5 +12,29 @@ Read the **target project's** `docs/playbook/README.md`; if it doesn't exist, pr
 5. Quick-scan `docs/playbook/known-failures.md`: did you step back into an old pit? Any new pit = add it to the museum in the same commit. A repeated external-review finding from the same defect family must be recorded as a methodology failure, not merely another bug instance.
 6. Self-check against `docs/playbook/architecture-constraints.md` hard rules.
 7. Review-loop stop rule: after an external NO-GO, classify each finding as a new family or a missed member of an old family. A missed member reopens the family inventory. Run an internal adversarial pass before another external call. If the same family returns again after fresh-context review, stop and escalate methodology or ownership rather than continuing line-item repair loops.
-8. If the project has a handoff convention, update the handoff snapshot per `docs/playbook/handoff-template.md` plus any synced status files, then commit only when the user's workflow authorizes commit.
-9. Report completion in three parts: ① what changed ② evidence by layer, with actual command/probe output ③ what the user should verify and exactly how to try it. List remaining exclusions and assumptions explicitly; never equate test count with proof of an invariant.
+8. **Provider execution evidence.** For every dispatched role in this work, record:
+
+   ```text
+   role / provider / profile / explicit model
+   session ID + fresh-vs-resumed state
+   task packet identity (path or content hash)
+   artifact directory
+   runner classified outcome
+   manifest verification result (verify-manifest)
+   pre/post Git state
+   changed paths + allowed/forbidden result
+   stdout/stderr/final-result artifact identity
+   timeout/interrupt/process exit status
+   ```
+
+   For a `claude_subagent` dispatch there is no external-runner artifact bundle — mark it explicitly as `execution path = claude_subagent / external manifest = not applicable`. Never fabricate an external artifact bundle that does not exist.
+9. **Adversarial reviewer evidence.** List findings / observations / suggestions / evidence gaps separately. Verify each finding carries its violated requirement and repository evidence — an item missing either is not a valid finding and may only be reported as an observation or evidence gap. Until the ChatGPT/user control window adjudicates, every finding is a **candidate finding**; a review outcome is not automatically an acceptance verdict.
+10. **Git and authorization evidence.** Report explicitly: Git authorization actually granted; Git writes actually performed; push authorization; PR authorization; merge authorization; current HEAD; `git status --short`; remote state. If the project has a handoff convention, update the handoff snapshot per `docs/playbook/handoff-template.md` plus any synced status files — then commit **only** when the user's workflow authorizes commit. Never commit merely because the work is finished.
+11. Report completion in three parts: ① what changed ② evidence by layer, with actual command/probe output ③ what the user should verify and exactly how to try it. List remaining exclusions and assumptions explicitly; never equate test count with proof of an invariant. End the wrap-up with the explicit authorization state — unless the current authorization packet explicitly says otherwise:
+
+    ```text
+    NEXT ROLE AUTHORIZED: NO
+    NEXT BATCH AUTHORIZED: NO
+    ```
+
+    Wrap-up never starts the next role or batch on its own.

@@ -1,15 +1,44 @@
 ---
-description: "Execution order: the user approves the confirmed plan — start work now"
+description: "Execution order: the user authorizes the exact planned role/batch — verify plan identity, then start"
 argument-hint: optional final adjustments
 ---
 > **Language — always respond in the user's language.** This file is written in English for maintainability. English is the language of these *instructions*, not of your *output*. Converse with, question, and report to the user in the same language they write to you in: Traditional Chinese in → Traditional Chinese out; Simplified Chinese → Simplified Chinese; Japanese → Japanese; English → English. Never switch to English just because this file happens to be in English.
 
 Execution order from the user. Final adjustments (may be empty): $ARGUMENTS
 
-This command is the formal start-work signal that `/orchestration:kickoff` waits for. The user has approved the plan and is authorizing execution **now**.
+This command is the formal start-work signal that `/orchestration:kickoff` waits for. It authorizes execution of **exactly one currently authorized role or batch** — nothing more.
 
-1. **Locate the confirmed plan**: the most recent plan in this conversation that the user signed off on (typically the kickoff output plus any revisions agreed in discussion). Fold any final adjustments from the arguments above into it before starting.
-2. **Execute without re-asking**: dispatch per the plan's breakdown, report stage-by-stage progress, and run the target project's verification battery before reporting done. Do not ask for permission again — this command *is* the permission.
-3. **If no confirmed plan exists in context** — or the discussion has drifted so far that the plan no longer matches — do not guess and do not start. Restate in one short block what you believe you are being asked to execute, and ask the user to confirm once.
+1. **Locate the formal execution authority.** Conversation memory alone is not authority. The authorization must reference an authoritative plan with a verifiable identity:
+   - authoritative planning branch;
+   - authoritative plan commit SHA;
+   - canonical base SHA;
+   - the exact authorized role or batch;
+   - allowed files and forbidden files;
+   - acceptance commands;
+   - stop conditions;
+   - Git authorization;
+   - External-side-effect authorization.
 
-Scope note: this authorization covers the confirmed plan only. Genuinely new work discovered mid-execution is a scope change — bring it back to the user instead of folding it in silently.
+   Chat revisions count only if they are already reflected in the authoritative plan commit, or are explicitly recorded as a narrow supplement to this authorization packet. Vague recollection of "what we agreed" is not authority.
+
+2. **Verify the plan identity before executing.** Adapt the exact refs/paths to the target project's convention, but the semantics are fixed — the planning ref must resolve, the plan SHA must match exactly, base/target identity must be verifiable, the worktree state must match the authorization, and the plan content must be readable:
+
+   ```bash
+   git status --short
+   git branch --show-current
+   git rev-parse HEAD
+   git fetch origin
+   git rev-parse <planning-ref>
+   git show <plan-sha>:<plan-file>
+   ```
+
+   If verification fails, or the requested work exceeds what the plan authorizes (scope drift), stop before any execution.
+
+3. **Resolve routing, then execute through the dispatch contract.** Determine the executable role for this authorization (`feasibility_verifier`, `implementer`, or `adversarial_reviewer` — or orchestrator-owned work that needs no dispatch), read the target project's `docs/playbook/agent-routing.json`, resolve provider/profile, and hand off per the `/orchestration:dispatch` contract. Unknown or unsafe routing stops before any provider spawn. Do not re-ask for permission for the exact authorized scope — this command *is* that permission.
+
+4. **Missing authority = stop.** If the authoritative plan identity fields are missing, do not substitute a "I believe you meant…" plus an ordinary confirmation. Stop and list exactly which authority fields are missing (branch, plan commit SHA, canonical base SHA, role/batch, allowed/forbidden files, acceptance, stop conditions, Git authorization, External-side-effect authorization).
+
+Scope rules:
+
+- This authorization covers the one named role/batch only. It does not imply the next batch, a reviewer dispatch, or any follow-on role. Genuinely new work discovered mid-execution is a scope change — bring it back to the user instead of folding it in silently.
+- **Git authorization is separate from execution authorization.** `/go` means "execute the exact authorized role/batch". It does not grant commit, push, PR, merge, rebase, force push, or branch/worktree deletion. Git writes happen only when the task packet's `Git authorization` field explicitly lists them, and only exactly what is listed.
