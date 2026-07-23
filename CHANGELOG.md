@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.6.0] - 2026-07-23
+
+### Added
+
+- Role-first / provider-second routing contract: workflow roles (`feasibility_verifier`, `implementer`, `adversarial_reviewer`) are resolved to a provider/profile via the project-local routing SSOT `docs/playbook/agent-routing.json`; authority owners (architecture / authoritative plan / authorization / acceptance / final adjudication) stay fixed to the ChatGPT/user control window.
+- `docs/playbook/agent-routing.json` default routing file: Codex feasibility + implementation, Claude adversarial review, with fail-closed provider-separation constraints.
+- Task-packet templates `examples/task-packets/codex-feasibility.md`, `examples/task-packets/codex-implementation.md`, and `examples/task-packets/claude-adversarial-review.md` (16 mandatory common header fields, fixed role behavior contracts).
+- Common structured-result schema `examples/schemas/orchestration-result.schema.json`: shared envelope plus reviewer findings/observations/suggestions/evidence-gaps separation, seven mandatory finding fields, and the Blocker/Major/Minor severity enum.
+- Bounded external-agent runner `scripts/orchestration_agent.py`: single-role CLI invocation, process-group timeout/interrupt control, separate stdout/stderr capture, pre/post Git evidence, read-only mutation detection, changed-path allowlist validation, artifact SHA-256 manifest with `verify-manifest`, and fail-closed outcome classification.
+- Fake-CLI safety test suite (43 tests, zero quota / zero network) plus embedded-template drift protection (15 tests).
+
+### Changed
+
+- `/orchestration:kickoff` now requires formal planning-identity fields in the plan draft (plan branch/SHA, canonical base, allowed/forbidden files, Git and external-side-effect authorization, role map) and still stops before execution; the dispatch breakdown is written by workflow role.
+- `/orchestration:go` now requires an authoritative plan commit identity — a conversation-only confirmed plan is no longer execution authority.
+- `/orchestration:dispatch` resolves the workflow role first, then the provider from `agent-routing.json`; external CLI paths go through the bounded runner; the implementer cannot dispatch the reviewer and the reviewer cannot repair code.
+- `/orchestration:wrapup` now records provider/session/artifact/Git-authority evidence and ends with an explicit `NEXT ROLE AUTHORIZED: NO` / `NEXT BATCH AUTHORIZED: NO` state.
+- `/orchestration:init-playbook` now generates 11 files (adding `agent-routing.json`), keeps skip-don't-overwrite semantics for every existing target file including custom routing, and its embedded templates use four-backtick outer fences protected by automated byte-level drift tests.
+- Default role mapping becomes Codex feasibility + implementation with Claude adversarial review; the existing Claude `scout`/`worker`/`executor` agents remain byte-unchanged as the `claude_subagent` fallback path.
+
+### Security
+
+- No automatic role chaining, reviewer dispatch, provider fallback, or semantic retry in the runner or the commands.
+- The runner performs no Git writes (a read-only Git evidence allowlist is enforced in code and by AST tests) and never cleans or reverts violating changes — evidence is preserved for adjudication.
+- Provider separation fails closed: implementer and reviewer must resolve to different providers, and read-only roles cannot map to write-capable profiles.
+- Read-only mutation and forbidden-path changes are detected through independent pre/post Git evidence, never through provider self-reporting alone.
+- Dangerous provider bypass flags are excluded by static tests; automated tests use fake `codex`/`claude` executables only.
+- A separately authorized real-CLI smoke test is still pending and required before production-Gate use: real network isolation, real output-schema/stream compatibility, and real quota/timeout behavior are not yet verified.
+- This release adapts the development orchestration plugin only; it does not implement the future Xinghui Runtime Claude/Codex adapter.
+
 ## [0.5.0] - 2026-07-21
 
 ### Added

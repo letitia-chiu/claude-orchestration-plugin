@@ -45,12 +45,41 @@ Five slash commands map to the stages of the workflow:
 | Command | What it does |
 |---|---|
 | `/orchestration:kickoff` | Kickoff ritual: blind-spot pass → questions → plan (including how to split the dispatch) — **stops at the plan, does not start work** |
-| `/orchestration:go` | Execution order: nothing is executed until the user fires this (the authorization is injected fresh at the moment of use, so it can't be diluted by long context) |
-| `/orchestration:dispatch` | Turn a task into a six-field dispatch order and send it to the right tier |
-| `/orchestration:wrapup` | Wrap-up ritual: verification battery → known-failures check → handoff |
-| `/orchestration:init-playbook` | Generate the `docs/playbook/` skeleton in the target project (never overwrites existing files) |
+| `/orchestration:go` | Execution order: verifies the authoritative plan identity (planning branch / plan commit SHA / canonical base) and authorizes exactly one role or batch — conversation memory alone is not execution authority |
+| `/orchestration:dispatch` | Turn a task into a complete task packet, classify its workflow role, and route it via `agent-routing.json` to the Claude subagent tiers or the bounded external runner |
+| `/orchestration:wrapup` | Wrap-up ritual: verification battery → known-failures check → provider/session/artifact evidence → handoff |
+| `/orchestration:init-playbook` | Generate the `docs/playbook/` skeleton — 11 files including `agent-routing.json` — in the target project (never overwrites existing files; embedded templates are drift-protected by automated tests) |
 
 The cost intuition behind the tiers (API pricing ratio, subscription quota trends the same way): **Haiku : Sonnet : Opus ≈ 1 : 3 : 15.** Every token the orchestrator spends is the most expensive token in the system — so it delegates raw reading and mechanical edits downward and keeps only judgment for itself.
+
+## Role-first provider routing (0.6.0)
+
+Since 0.6.0 the workflow separates **what a task is** (its workflow role) from **which engine runs it** (provider/profile). The routing SSOT is the target project's `docs/playbook/agent-routing.json`; switching providers is a routing-file + task-packet change, not a rewrite of the commands or the methodology.
+
+```text
+role             = what the work is (behavior contract)
+provider/profile = which engine executes it, and with which permission boundary
+```
+
+**Authority stays with the control window.** The ChatGPT / user control window owns architecture, authoritative planning, authorization, acceptance, finding adjudication, and final ratification. An executable provider only carries out an explicitly authorized task packet — it never becomes the plan or acceptance owner.
+
+Default routing generated for new projects:
+
+```text
+feasibility_verifier -> codex_cli / codex_read_only
+implementer          -> codex_cli / codex_workspace_write
+adversarial_reviewer -> claude_cli / claude_read_only
+```
+
+Exactly three provider kinds are supported: `claude_subagent`, `codex_cli`, and `claude_cli`. There is no arbitrary-provider support, no dynamic provider discovery, no capability negotiation, no automatic fallback, and no cross-provider session migration.
+
+**The Claude tiers remain, as the `claude_subagent` path.** `scout`, `worker`, and `executor` are unchanged and fully supported — they are the routing fallback (mapping `implementer` back to worker/executor is a one-line routing change), not deleted legacy, and not the permanently fixed implementer.
+
+**Bounded external-agent runner.** External CLI providers are invoked only through `scripts/orchestration_agent.py`, a narrow process-safety wrapper providing: routing and provider/profile validation, single-role process invocation, wall-clock timeout and interrupt classification, separate stdout/stderr capture, structured-result validation against the shared schema (`examples/schemas/orchestration-result.schema.json`), pre/post Git evidence, read-only mutation detection, implementation changed-path allowlist validation, an artifact SHA-256 manifest, and fail-closed outcome classification. It does **not** plan, chain roles, retry or fall back automatically, commit/push/PR/merge, or clean up violating changes — and it is neither a generic provider SDK nor a Xinghui Runtime provider adapter.
+
+**Git and side-effect boundaries.** Execution authorization is not Git authorization: commit, push, PR, and merge each require their own explicit grant. A real external CLI invocation requires the task packet to carry `External-side-effect authorization: ALLOW_PROVIDER_INVOCATION`. The implementer may not dispatch the reviewer; the reviewer is read-only and may not repair code; reviewer findings are candidate findings until the control window adjudicates them. Task-packet templates live in `examples/task-packets/`.
+
+**Real-CLI status.** Automated tests use fake Codex and Claude executables. A separately authorized real-CLI smoke test is still required before using this workflow on a production implementation Gate — real network isolation, real schema/stream compatibility, and real quota/timeout behavior are not yet verified. This release adapts the development orchestration plugin; it does not implement the future Xinghui Runtime Claude/Codex adapter.
 
 ## Customizing the model per tier (update-safe)
 

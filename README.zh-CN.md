@@ -45,12 +45,41 @@ Orchestrator（主 session — 可用的最强模型 + 高投入）
 | 命令 | 作用 |
 |---|---|
 | `/orchestration:kickoff` | 开工仪式：盲区排查 → 提问 → 制定计划（包括如何拆分派工）——**停在计划、不开工** |
-| `/orchestration:go` | 开工令：用户下达该命令才开始执行（授权在使用当下才注入，不会被长对话稀释） |
-| `/orchestration:dispatch` | 把任务转成六字段的派工单，发送给正确的层级 |
-| `/orchestration:wrapup` | 收尾仪式：验证清单 → 历史遗留问题检查 → 交接 |
-| `/orchestration:init-playbook` | 在目标项目生成 `docs/playbook/` 骨架（不会覆盖已有文件） |
+| `/orchestration:go` | 开工令：先验证 authoritative plan 身份（planning branch／plan commit SHA／canonical base），一次只授权一个 role 或 batch——只靠对话记忆不构成执行授权 |
+| `/orchestration:dispatch` | 把任务转成完整 task packet、判定 workflow role，再按 `agent-routing.json` 路由到 Claude subagent 层级或 bounded external runner |
+| `/orchestration:wrapup` | 收尾仪式：验证清单 → 历史遗留问题检查 → provider／session／artifact 证据 → 交接 |
+| `/orchestration:init-playbook` | 在目标项目生成 `docs/playbook/` 骨架——11 个文件、含 `agent-routing.json`（不覆盖已有文件；内嵌模板有自动化防漂移测试保护） |
 
 各层级背后的成本直觉（API 定价比例，订阅制的额度消耗趋势相同）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15。** Orchestrator 花的每一个 token 都是系统里最贵的 token——所以它把单纯的阅读与机械性修改下放，自己只保留判断力。
+
+## Role-first 派工路由（0.6.0）
+
+自 0.6.0 起，工作流把**任务是什么**（workflow role）与**由哪个引擎执行**（provider/profile）分开。路由的 SSOT 是目标项目的 `docs/playbook/agent-routing.json`；更换 provider 只需改路由文件＋派工单，不必重写整套 commands 或方法论。
+
+```text
+role             ＝ 工作职责（行为契约）
+provider/profile ＝ 执行引擎与权限边界
+```
+
+**权责留在控制窗口。** ChatGPT／用户控制窗口持有 architecture、authoritative planning、authorization、acceptance、finding adjudication 与 final ratification。可执行的 provider 只执行已明确授权的 task packet——不会成为 plan 或 acceptance 的 owner。
+
+新项目生成的默认路由：
+
+```text
+feasibility_verifier -> codex_cli / codex_read_only
+implementer          -> codex_cli / codex_workspace_write
+adversarial_reviewer -> claude_cli / claude_read_only
+```
+
+仅支持三种 provider kind：`claude_subagent`、`codex_cli`、`claude_cli`。不支持任意 provider，没有动态 provider discovery、capability negotiation、automatic fallback，也没有跨 provider 的 session migration。
+
+**Claude 三层完整保留，作为 `claude_subagent` 路径。** `scout`、`worker`、`executor` 原封不动、完整支持——它们是路由上的 fallback（把 `implementer` 改回 worker/executor 只是一行路由变更），不是被删除的旧功能，也不是永远固定的 implementer。
+
+**Bounded external-agent runner。** 外部 CLI provider 一律经 `scripts/orchestration_agent.py` 这个窄版 process-safety wrapper 调用，提供：routing 与 provider/profile 验证、单一 role 的 process invocation、wall-clock timeout 与 interrupt 分类、stdout／stderr 分离保存、按共用 schema（`examples/schemas/orchestration-result.schema.json`）验证 structured result、pre/post Git 证据、只读角色的 mutation 检测、implementation changed-path allowlist 验证、artifact SHA-256 manifest、fail-closed 结果分类。它**不会**自动规划、串接下一角色、自动 retry／fallback、commit／push／PR／merge、清理违规变更——它也不是 generic provider SDK，更不是 Xinghui Runtime 的 provider adapter。
+
+**Git 与 side-effect 边界。** 执行授权不等于 Git 授权：commit、push、PR、merge 必须各自明确授权。真实的外部 CLI 调用需要 task packet 携带 `External-side-effect authorization: ALLOW_PROVIDER_INVOCATION`。implementer 不得自行 dispatch reviewer；reviewer 只读、不得修 code；reviewer 的 findings 在控制窗口裁定前只是 candidate findings。派工单模板在 `examples/task-packets/`。
+
+**Real-CLI 现状。** 自动化测试使用假的（fake）Codex 与 Claude 可执行文件。在正式 implementation Gate 上使用本工作流之前，仍需另行授权的 real-CLI smoke test——真实的 network isolation、schema／stream 兼容性、quota／timeout 行为都尚未验证。本版本改造的是开发用 orchestration plugin，并未实现未来的 Xinghui Runtime Claude/Codex adapter。
 
 ## 按层级自定义模型（不怕更新覆盖）
 

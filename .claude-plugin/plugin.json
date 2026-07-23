@@ -1,12 +1,12 @@
 {
   "name": "orchestration",
   "displayName": "Orchestration Workflow",
-  "description": "A cross-project set of slash commands, subagents, and audit skills for an orchestrate-and-delegate workflow: the main session plans, generalizes findings, assigns invariant ownership, and verifies; layered subagents carry out bounded work.",
-  "version": "0.5.0",
+  "description": "A cross-project set of slash commands, subagents, and audit skills for a role-first orchestrate-and-delegate workflow: the main session keeps authoritative planning, authorization, and acceptance; workflow roles are routed via an evidence-oriented routing file to bounded Claude subagent, Codex CLI, or Claude CLI execution paths.",
+  "version": "0.6.0",
   "author": {
     "name": "letitia-chiu"
   },
-  "keywords": ["orchestration", "subagents", "workflow", "runtime-contracts"],
+  "keywords": ["orchestration", "subagents", "workflow", "runtime-contracts", "role-routing", "codex", "claude", "agent-safety"],
   "license": "MIT",
   "repository": "https://github.com/letitia-chiu/claude-orchestration-plugin",
   "homepage": "https://github.com/letitia-chiu/claude-orchestration-plugin#readme"

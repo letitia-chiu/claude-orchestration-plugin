@@ -1,6 +1,6 @@
 {
   "name": "orchestration-marketplace",
-  "description": "A cross-project set of slash commands and subagents for an orchestrate-and-delegate workflow: the main session plans, breaks down, and dispatches work; layered subagents (scout / worker / executor) carry it out.",
+  "description": "A cross-project set of slash commands, subagents, and audit skills for a role-first orchestrate-and-delegate workflow: the main session keeps authoritative planning, authorization, and acceptance; workflow roles are routed via an evidence-oriented routing file to bounded Claude subagent, Codex CLI, or Claude CLI execution paths.",
   "owner": {
     "name": "letitia-chiu"
   },
@@ -8,7 +8,7 @@
     {
       "name": "orchestration",
       "source": "./",
-      "description": "A cross-project set of slash commands and subagents for an orchestrate-and-delegate workflow: the main session plans, breaks down, and dispatches work; layered subagents (scout / worker / executor) carry it out."
+      "description": "A cross-project set of slash commands, subagents, and audit skills for a role-first orchestrate-and-delegate workflow: the main session keeps authoritative planning, authorization, and acceptance; workflow roles are routed via an evidence-oriented routing file to bounded Claude subagent, Codex CLI, or Claude CLI execution paths."
     }
   ]
 }

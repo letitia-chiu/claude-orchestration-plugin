@@ -45,12 +45,41 @@ Orchestrator（メインセッション — 利用可能な最強のモデル + 
 | コマンド | 内容 |
 |---|---|
 | `/orchestration:kickoff` | 開始儀式: 盲点の洗い出し → 質問 → 計画（ディスパッチの分割方法を含む）——**計画で停止し、実行は開始しない** |
-| `/orchestration:go` | 実行指示: ユーザーがこのコマンドを出して初めて実行が始まる（許可は使用時に新しく注入されるため、長い対話でも薄まらない） |
-| `/orchestration:dispatch` | タスクを6項目からなる派工単（ディスパッチオーダー）に変換し、適切な階層へ送る |
-| `/orchestration:wrapup` | 締めの儀式: 検証バッテリー → 既知の失敗チェック → 引き継ぎ |
-| `/orchestration:init-playbook` | 対象プロジェクトに `docs/playbook/` の骨格を生成する（既存ファイルは上書きしない） |
+| `/orchestration:go` | 実行指示: まず authoritative plan の同一性（planning branch／plan commit SHA／canonical base）を検証し、一度に1つの role または batch のみを許可する——会話の記憶だけでは実行権限にならない |
+| `/orchestration:dispatch` | タスクを完全な task packet に変換し、workflow role を判定したうえで、`agent-routing.json` に従って Claude subagent 階層または bounded external runner にルーティングする |
+| `/orchestration:wrapup` | 締めの儀式: 検証バッテリー → 既知の失敗チェック → provider／session／artifact の証跡 → 引き継ぎ |
+| `/orchestration:init-playbook` | 対象プロジェクトに `docs/playbook/` の骨格を生成する——`agent-routing.json` を含む11ファイル（既存ファイルは上書きしない。埋め込みテンプレートは自動テストでドリフトから保護される） |
 
 各階層の背後にあるコスト感覚（API価格の比率であり、サブスクリプションのクォータもほぼ同じ傾向）: **Haiku : Sonnet : Opus ≈ 1 : 3 : 15。** orchestrator が使うトークン1つ1つがシステム内で最もコストの高いトークンです——だからこそ、生の読み取りや機械的な編集は下位に委任し、判断だけを自分の手元に残します。
+
+## Role-first プロバイダールーティング（0.6.0）
+
+0.6.0 以降、ワークフローは**タスクが何であるか**（workflow role）と**どのエンジンが実行するか**（provider/profile）を分離します。ルーティングの SSOT は対象プロジェクトの `docs/playbook/agent-routing.json` です。プロバイダーの切り替えはルーティングファイル＋task packet の変更だけで済み、コマンド群や方法論を書き直す必要はありません。
+
+```text
+role             ＝ 仕事の職責（振る舞いの契約）
+provider/profile ＝ 実行エンジンと権限の境界
+```
+
+**権限は制御ウィンドウに残ります。** ChatGPT／ユーザー制御ウィンドウが architecture、authoritative planning、authorization、acceptance、finding adjudication、final ratification を保持します。実行プロバイダーは明示的に許可された task packet を実行するだけであり、plan や acceptance のオーナーには決してなりません。
+
+新規プロジェクトに生成されるデフォルトルーティング:
+
+```text
+feasibility_verifier -> codex_cli / codex_read_only
+implementer          -> codex_cli / codex_workspace_write
+adversarial_reviewer -> claude_cli / claude_read_only
+```
+
+サポートされる provider kind は `claude_subagent`、`codex_cli`、`claude_cli` の3種類のみです。任意プロバイダーのサポート、動的な provider discovery、capability negotiation、automatic fallback、プロバイダー間の session migration はありません。
+
+**Claude の三層は `claude_subagent` パスとして完全に残ります。** `scout`、`worker`、`executor` は変更なく完全にサポートされます——これらはルーティング上の fallback であり（`implementer` を worker/executor に戻すのは1行のルーティング変更です）、削除された旧機能でも、永久に固定された implementer でもありません。
+
+**Bounded external-agent runner。** 外部 CLI プロバイダーは必ず `scripts/orchestration_agent.py` という限定的な process-safety wrapper 経由で呼び出されます。提供機能: routing と provider/profile の検証、単一 role のプロセス起動、wall-clock timeout と interrupt の分類、stdout／stderr の分離保存、共有スキーマ（`examples/schemas/orchestration-result.schema.json`）による structured result の検証、pre/post Git 証跡、読み取り専用ロールの mutation 検出、implementation changed-path allowlist 検証、artifact の SHA-256 manifest、fail-closed な結果分類。これは自動で計画したり、次のロールに連鎖したり、retry／fallback したり、commit／push／PR／merge したり、違反変更をクリーンアップしたり**しません**——generic provider SDK でも、Xinghui Runtime の provider adapter でもありません。
+
+**Git と副作用の境界。** 実行許可は Git 許可ではありません: commit、push、PR、merge はそれぞれ個別の明示的な許可が必要です。実際の外部 CLI 呼び出しには task packet に `External-side-effect authorization: ALLOW_PROVIDER_INVOCATION` が必要です。implementer は reviewer を dispatch できません。reviewer は読み取り専用でコードを修復できません。reviewer の findings は制御ウィンドウが裁定するまで candidate findings にすぎません。task packet テンプレートは `examples/task-packets/` にあります。
+
+**Real-CLI の現状。** 自動テストは偽（fake）の Codex／Claude 実行ファイルを使用します。本番の implementation Gate でこのワークフローを使う前に、別途許可された real-CLI smoke test が依然として必要です——実際の network isolation、schema／stream 互換性、quota／timeout の挙動は未検証です。本リリースは開発用 orchestration plugin を適応させるものであり、将来の Xinghui Runtime Claude/Codex adapter を実装するものではありません。
 
 ## 階層ごとのモデルをカスタマイズ（更新に強い）
 
