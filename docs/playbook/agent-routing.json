@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "authority": {
+    "architecture_owner": "chatgpt",
+    "authoritative_plan_owner": "chatgpt",
+    "authorization_owner": "chatgpt",
+    "acceptance_owner": "chatgpt",
+    "final_adjudicator": "chatgpt"
+  },
+  "roles": {
+    "feasibility_verifier": {
+      "provider": "codex_cli",
+      "profile": "codex_read_only"
+    },
+    "implementer": {
+      "provider": "codex_cli",
+      "profile": "codex_workspace_write"
+    },
+    "adversarial_reviewer": {
+      "provider": "claude_cli",
+      "profile": "claude_read_only"
+    }
+  },
+  "constraints": {
+    "require_distinct_implementer_and_reviewer_provider": true,
+    "implementer_may_dispatch_reviewer": false,
+    "reviewer_may_modify_repository": false,
+    "external_git_writes_require_separate_authorization": true
+  }
+}

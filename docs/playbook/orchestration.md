@@ -4,7 +4,7 @@
 |---|---|
 | 適用場景 | 統籌窗（使用者開的主 session）的日常運作：拆單、派工、驗收、交班 |
 | 不適用場景 | 產品本身的 runtime 行為；純聊天／一句話問答 |
-| 必讀前置 | `README.md`＋`task-routing.md`（若已填寫） |
+| 必讀前置 | `README.md`＋`task-routing.md`＋`agent-routing.json`（角色→provider 路由） |
 | 不能違反的約束 | 驗收永遠在統籌；規格不清不准派工；同一不變量只准一個實作 owner |
 | 例外處理 | 止血可統籌親手做＋事後補審；同一 defect family 在外部覆核重現兩次＝停止逐點修補，升級方法或 owner |
 | 驗收方式 | 不只看測試全綠：必須同時有 inventory、class closure、adversarial probe、valid-path regression |
@@ -12,19 +12,48 @@
 ## 架構一張圖
 
 ```text
-統籌（主窗，當下可用的最高智慧模型 + high effort）
-│  只做：理解需求、盲區／提問、抽象化 finding、拆單、派工、對抗式驗收、整合、交班
+權責層（不可執行、不可路由）
+ChatGPT ＝ architecture／authoritative plan／authorization／acceptance／final adjudication owner
 │
-├─ scout    ＝Haiku 4.5   唯讀偵察（找檔／讀碼／盤點 surface／彙整現況）
-├─ worker   ＝Sonnet 5    規格明確且邊界獨立的實作／測試／批次修改
-├─ executor ＝Opus 4.8    已規格化但難、跨模組、精密度高的單一-owner 實作
-├─ 外部模型覆核           獨立、只審不改；依風險分級
-└─ 驗證 lens              內部對抗式審查；不取代外部獨立覆核
+統籌（主窗，當下可用的最高智慧模型 + high effort）
+│  只做：理解需求、盲區／提問、抽象化 finding、拆單、依 agent-routing.json 路由派工、
+│        對抗式驗收整理、整合、交班（驗收與裁定的最終權在權責層）
+│
+├─ feasibility_verifier ＝唯讀可行性查證（fresh session；預設 codex_cli / codex_read_only）
+├─ implementer          ＝主要實作（限授權 worktree；預設 codex_cli / codex_workspace_write）
+├─ adversarial_reviewer ＝fresh-context 對抗式覆核（只審不改；預設 claude_cli / claude_read_only）
+├─ claude_subagent path ＝scout（Haiku 4.5 唯讀偵察）／worker（Sonnet 5）／executor（Opus 4.8）
+│                         既有 agents 完整保留，是隨時可切回的 fallback provider
+└─ 驗證 lens            ＝內部對抗式審查；不取代外部獨立覆核
 ```
 
+- 角色（做什麼）與 provider（用哪個引擎執行）分離；provider 對映以 `agent-routing.json` 為 SSOT，細節見 `task-routing.md`。
 - 統籌模型：當下可用的最高智慧模型＋effort high。
-- 成本權重（API 定價比例，訂閱額度同方向）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15**。effort：統籌自選（/effort）；executor/worker＝medium（釘在 agents frontmatter）；scout（Haiku 4.5）不支援 effort 參數＝不設。
-- 執行者一律**開工第一行自報模型 ID**（釘選探針的指紋機制，防「以為派了便宜的、其實跑到貴的」）；高風險外部覆核另驗 model＋effort。
+- claude_subagent path 成本權重（API 定價比例，訂閱額度同方向）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15**。effort：統籌自選（/effort）；executor/worker＝medium（釘在 agents frontmatter）；scout（Haiku 4.5）不支援 effort 參數＝不設。
+- 執行者一律**開工第一行自報模型 ID**（釘選探針的指紋機制，防「以為派了便宜的、其實跑到貴的」）；外部 CLI provider 另以工單的 Explicit model 欄位釘住；高風險覆核另驗 model＋effort。
+
+## 角色與 provider 分離
+
+權責 owner 固定、不可路由：
+
+```text
+architecture_owner        = chatgpt
+authoritative_plan_owner  = chatgpt
+authorization_owner       = chatgpt
+acceptance_owner          = chatgpt
+final_adjudicator         = chatgpt
+```
+
+執行角色只有三個：`feasibility_verifier`（唯讀查證）、`implementer`（單一 batch 實作）、`adversarial_reviewer`（fresh-context 只審不改）。行為契約與 provider 無關，換 provider 不換契約。
+
+不可越權的硬邊界：
+
+- implementer 不得 dispatch reviewer；reviewer 不得修 code；兩者 provider 必須不同（fail closed）。
+- feasibility 與 implementation 不共用 session；reviewer 永遠 fresh session。
+- 外部 provider 的任何 Git 寫入需 authorization owner 另行明文授權。
+- reviewer 產出的是 candidate findings；成立與否由 final_adjudicator 裁定，統籌只做整理與轉呈。
+
+可逆性：把 implementer 換回 `claude_subagent`（worker／executor）或 reviewer 換回其他已支援 provider，只改 `agent-routing.json`＋工單；commands 與本檔方法論不動。
 
 ## 統籌七律
 
@@ -46,14 +75,14 @@
 
 命令／agent 腳本英文化，只是「給模型讀的指令」用英文，不是你的輸出語言。長 session 尤其容易漂成英文——這是明確失敗模式，收尾回報時務必自檢。
 
-## 派誰
+## 派誰（先選 role，再由 agent-routing.json 解析 provider）
 
-| 任務長相 | 派 | 附加規則 |
+| 任務長相 | role（→ 預設 provider/profile） | 附加規則 |
 |---|---|---|
-| 現況／檔案／surface 盤點 | scout | 唯讀；回傳結論＋證據，不貼大段原文 |
-| 規格明確、邊界獨立的實作 | worker | 不得與其他 agent 共用同一 invariant owner |
-| 已規格化但難、跨模組契約、精密重構 | executor | production＋共用 validator＋inventory＋boundary tests 同一 context |
-| 高風險第二雙眼 | 外部模型 | fresh context、只審不改、凍結候選集合；覆核模型依風險分級（平衡型日常／旗艦關卡／輕量低風險；專案有委派範本則照其格式）；外部模型不可用＝lens 加倍（rubric 有明文） |
+| 現況／檔案／surface 盤點 | scout（claude_subagent） | 唯讀；回傳結論＋證據，不貼大段原文 |
+| 對 authoritative plan 的 repository-local 可行性查證 | feasibility_verifier（→ codex_cli / codex_read_only） | 唯讀、fresh session；verdict 只有三種；工單用 codex-feasibility packet |
+| 規格明確、已授權的實作 batch | implementer（→ codex_cli / codex_workspace_write） | 限授權 worktree＋allowed files；工單用 codex-implementation packet；fallback＝claude_subagent worker（邊界獨立；不得與其他 agent 共用同一 invariant owner）／executor（跨模組、精密；production＋共用 validator＋inventory＋boundary tests 同一 context） |
+| 高風險第二雙眼 | adversarial_reviewer（→ claude_cli / claude_read_only） | fresh context、只審不改、凍結候選集合；工單用 claude-adversarial-review packet；覆核模型依風險分級（平衡型日常／旗艦關卡／輕量低風險；專案有委派範本則照其格式）；finding 成立由 final_adjudicator 裁定；外部 reviewer 不可用＝lens 加倍（rubric 有明文） |
 | 判斷／語氣／審美／小事 | 統籌自己 | 派工成本高於自做 |
 
 ## finding 泛化規則

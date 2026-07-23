@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/letitia-chiu/claude-orchestration-plugin/main/examples/schemas/orchestration-result.schema.json",
+  "title": "Orchestration external-agent result",
+  "description": "Common result envelope for feasibility_verifier / implementer / adversarial_reviewer runs. This file is the schema contract only; the mechanical validator and runner are delivered by a later batch of the orchestration codex enablement work package. An item that lacks violated_requirement or repository_evidence is not a valid finding and must be returned as an observation or evidence gap instead.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "role",
+    "provider",
+    "profile",
+    "model",
+    "verdict",
+    "summary",
+    "evidence",
+    "stop_reason",
+    "session_id",
+    "changed_files",
+    "tests",
+    "repository_state"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "role": {
+      "enum": ["feasibility_verifier", "implementer", "adversarial_reviewer"]
+    },
+    "provider": {
+      "enum": ["claude_subagent", "codex_cli", "claude_cli"]
+    },
+    "profile": {
+      "enum": [
+        "codex_read_only",
+        "codex_workspace_write",
+        "claude_read_only",
+        "scout",
+        "worker",
+        "executor"
+      ]
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exact model ID the run executed with, as self-reported and as configured in the invocation."
+    },
+    "verdict": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Role-specific verdict. feasibility_verifier is restricted to the three feasibility verdicts (see allOf)."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "file:line / command-output references backing the verdict."
+    },
+    "stop_reason": {
+      "type": ["string", "null"],
+      "description": "Null when the run completed; otherwise the stop condition that was hit."
+    },
+    "session_id": {
+      "type": ["string", "null"]
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Repo-relative paths changed by the run. Must be empty for read-only roles (see allOf)."
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "status"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": ["passed", "failed", "skipped"]
+          },
+          "output_digest": {
+            "type": "string",
+            "description": "Optional fingerprint (e.g. trailing lines or hash) of the actual output."
+          }
+        }
+      }
+    },
+    "repository_state": {
+      "type": "object",
+      "required": ["pre", "post"],
+      "properties": {
+        "pre": {
+          "$ref": "#/$defs/git_state"
+        },
+        "post": {
+          "$ref": "#/$defs/git_state"
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      },
+      "description": "adversarial_reviewer only. Candidate findings; only the final adjudicator (ChatGPT) may classify a candidate finding as established."
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "adversarial_reviewer only. Notes that do not meet the evidence bar for a finding."
+    },
+    "suggestions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "adversarial_reviewer only. Style preferences and optional improvements. Never findings."
+    },
+    "evidence_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "adversarial_reviewer only. Claims that could not be verified with the provided packet."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "role": {
+            "const": "adversarial_reviewer"
+          }
+        }
+      },
+      "then": {
+        "required": ["findings", "observations", "suggestions", "evidence_gaps"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "role": {
+            "const": "feasibility_verifier"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "verdict": {
+            "enum": [
+              "PASS_FOR_IMPLEMENTATION_AUTHORIZATION",
+              "PLAN_CHANGE_REQUIRED",
+              "EVIDENCE_INSUFFICIENT"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "role": {
+            "enum": ["feasibility_verifier", "adversarial_reviewer"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "changed_files": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "git_state": {
+      "type": "object",
+      "required": ["head_sha", "status_short"],
+      "properties": {
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        },
+        "status_short": {
+          "type": "string",
+          "description": "Verbatim `git status --short` output; empty string means clean."
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "description": "A candidate finding. All seven fields are mandatory; an item missing violated_requirement or repository_evidence fails validation and may only be reported as an observation or evidence gap.",
+      "required": [
+        "id",
+        "severity",
+        "violated_requirement",
+        "location",
+        "repository_evidence",
+        "impact",
+        "minimal_remediation_scope"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": ["Blocker", "Major", "Minor"]
+        },
+        "violated_requirement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository_evidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minimal_remediation_scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
