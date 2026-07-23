@@ -41,6 +41,12 @@ observations, suggestions, and evidence gaps. It may not modify the repository,
 start another role, adjudicate findings, accept the implementation, or ratify a
 release.
 
+Invoke the reviewer from the target repository root with the target-installed
+`scripts/orchestration_agent.py` and
+`docs/playbook/agent-routing.json`. The runner resolves
+`examples/schemas/orchestration-result.schema.json` from that same target root;
+no plugin-checkout path is part of the invocation.
+
 ## Prohibited routing
 
 - feasibility or implementation through the external runner;
