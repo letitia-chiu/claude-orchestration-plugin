@@ -121,9 +121,9 @@ class HostModeContractTests(unittest.TestCase):
             },
         )
 
-    def test_codex_hosted_adapter_is_declared_not_implemented(self):
+    def test_both_host_adapters_are_declared_implemented(self):
         self.assertEqual(
-            routing()["host_modes"]["codex_hosted"]["adapter_status"], "not_implemented"
+            routing()["host_modes"]["codex_hosted"]["adapter_status"], "implemented"
         )
         self.assertEqual(
             routing()["host_modes"]["claude_hosted"]["adapter_status"], "implemented"
@@ -316,6 +316,7 @@ class TaskPacketTemplateTests(unittest.TestCase):
     EXPECTED = {
         "active-host-feasibility.md",
         "active-host-implementation.md",
+        "codex-host-gate.md",
         "codex-adversarial-review.md",
         "claude-adversarial-review.md",
         "headless-codex-implementation.md",

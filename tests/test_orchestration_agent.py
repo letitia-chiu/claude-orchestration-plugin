@@ -538,23 +538,34 @@ class DualHostMatrixTests(RunnerTestCase):
         self.assertEqual(invocation["provider"], "claude_cli")
         self.assertEqual(invocation["profile"], "claude_read_only")
         self.assertEqual(invocation["cli_version"], "fake-claude 0.0.1")
-        self.assertEqual(invocation["host_adapter_status"], "not_implemented")
+        self.assertEqual(invocation["host_adapter_status"], "implemented")
 
-    def test_codex_hosted_feasibility_fails_closed(self):
+    def test_codex_hosted_feasibility_requires_native_host(self):
+        argv_file = self.tmp / "captured-argv.json"
         rc, artifacts, _, _ = self.run_runner(
-            "feasibility_verifier", host_mode="codex_hosted"
+            "feasibility_verifier",
+            host_mode="codex_hosted",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
         )
         self.assertEqual(rc, 2)
         invocation = self.assert_outcome(artifacts, "CAPABILITY_UNAVAILABLE")
-        self.assertIn("not implemented", invocation["detail"])
+        self.assertIn("host-native execution required", invocation["detail"])
+        self.assertIn("codex_desktop", invocation["detail"])
+        self.assertFalse(argv_file.exists(), "external CLI spawned for feasibility")
 
-    def test_codex_hosted_implementer_fails_closed(self):
+    def test_codex_hosted_implementer_requires_native_host(self):
+        argv_file = self.tmp / "captured-argv.json"
         rc, artifacts, _, _ = self.run_runner(
-            "implementer", host_mode="codex_hosted", invocation_path="active_host"
+            "implementer",
+            host_mode="codex_hosted",
+            invocation_path="active_host",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
         )
         self.assertEqual(rc, 2)
         invocation = self.assert_outcome(artifacts, "CAPABILITY_UNAVAILABLE")
-        self.assertIn("not implemented", invocation["detail"])
+        self.assertIn("host-native execution required", invocation["detail"])
+        self.assertIn("codex_desktop", invocation["detail"])
+        self.assertFalse(argv_file.exists(), "external CLI spawned for implementer")
 
     def test_headless_implementer_is_recorded_as_headless(self):
         rc, artifacts, _, _ = self.run_runner(

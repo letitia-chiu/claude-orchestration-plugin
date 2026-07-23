@@ -33,21 +33,21 @@
     },
     "codex_hosted": {
       "active_host": "codex_desktop",
-      "adapter_status": "not_implemented",
+      "adapter_status": "implemented",
       "local_tiers": {
         "scout": {
           "provider": "codex_native",
-          "profile": "pending_local_feasibility",
+          "profile": "scout",
           "model_override": null
         },
         "worker": {
           "provider": "codex_native",
-          "profile": "pending_local_feasibility",
+          "profile": "worker",
           "model_override": null
         },
         "executor": {
           "provider": "codex_native",
-          "profile": "pending_local_feasibility",
+          "profile": "executor",
           "model_override": null
         }
       },

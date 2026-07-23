@@ -1150,31 +1150,31 @@ def cmd_run(args):
             if host_conf["adapter_status"] != "implemented":
                 return finish(
                     CAPABILITY_UNAVAILABLE,
-                    "host mode %s adapter is not implemented (fail closed); "
-                    "Codex-host capability requires local read-only feasibility "
-                    "evidence first" % args.host_mode,
+                    "host-native execution required, but host mode %s adapter "
+                    "is unavailable (fail closed)" % args.host_mode,
                 )
             return finish(
                 CAPABILITY_UNAVAILABLE,
-                "feasibility_verifier runs on the active host (%s) through its own "
-                "host-local tier dispatch path; this external runner does not "
-                "emulate the active host" % host_conf["active_host"],
+                "host-native execution required: feasibility_verifier runs on "
+                "the active host (%s) through its own host-local tier dispatch "
+                "path; this external runner does not emulate the active host"
+                % host_conf["active_host"],
             )
         elif args.role == "implementer":
             if args.invocation_path == "active_host":
                 if host_conf["adapter_status"] != "implemented":
                     return finish(
                         CAPABILITY_UNAVAILABLE,
-                        "host mode %s adapter is not implemented (fail closed); "
-                        "Codex-host capability requires local read-only feasibility "
-                        "evidence first" % args.host_mode,
+                        "host-native execution required, but host mode %s adapter "
+                        "is unavailable (fail closed)" % args.host_mode,
                     )
                 return finish(
                     CAPABILITY_UNAVAILABLE,
-                    "implementer runs on the active host (%s) through its own "
-                    "host-local worker/executor tier; headless CLI implementation "
-                    "is a non-default opt-in requiring --invocation-path "
-                    "headless_cli plus separate authorization" % host_conf["active_host"],
+                    "host-native execution required: implementer runs on the "
+                    "active host (%s) through its own host-local worker/executor "
+                    "tier; headless CLI implementation is a non-default opt-in "
+                    "requiring --invocation-path headless_cli plus separate "
+                    "authorization" % host_conf["active_host"],
                 )
             if args.invocation_path != "headless_cli":
                 raise ConfigError(
