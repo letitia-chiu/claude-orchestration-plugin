@@ -20,11 +20,11 @@
 | 設計新功能 | `architecture-constraints.md` 全文＋`known-failures.md` §架構級 |
 | 動手寫 code 前後 | `review-rubric.md`（風險分級＋驗證電池決策表） |
 | 修 bug | `debug-playbook.md`（症狀速查）→ `known-failures.md`（別踩回舊坑）；動手修之前補跑盲區 pass |
-| 委派或覆核（governance／host／tier／reviewer 四層路由） | `task-routing.md`＋`agent-routing.json`＋`handoff-template.md` §工單；派工單用 plugin 附帶範本 `examples/task-packets/`（active-host-feasibility／active-host-implementation／codex-adversarial-review／claude-adversarial-review／headless-codex-implementation），回報對照 `examples/schemas/orchestration-result.schema.json`（schema v2） |
+| 委派或覆核（governance／host／tier／reviewer 四層路由） | `task-routing.md`＋`agent-routing.json`＋`handoff-template.md` §工單；派工單用 plugin 附帶範本 `examples/task-packets/`，回報對照 `examples/schemas/orchestration-result.schema.json`（schema v3：controller-owned provenance + provider_result） |
 | 大案子執行中 | `implementation-notes-template.md` |
 | 收尾/交班/換機 | `handoff-template.md`＋`review-rubric.md` §完成定義 |
 
-> 註：`agent-routing.json`（schema v2）是 governance-neutral、host-aware、tier-aware 路由的 SSOT：governance identity 由每次 task packet 明示；host mode（claude_hosted／codex_hosted）一次一個；兩個 adapter 均已實作，feasibility／implementation 走 active host 自家 scout／worker／executor；external reviewer 用對方 CLI（經 bounded runner：timeout、transcript、Git 證據、allowlist 驗證）。Codex-host surface 必須先用 `scripts/init_codex_host.py --target /absolute/path/to/target-repository` materialize 到 target Git repository；headless CLI implementation 為非預設 opt-in。
+> 註：`agent-routing.json`（routing schema v2）是 governance-neutral、host-aware、tier-aware 路由的 SSOT。Codex-hosted scout 是 Desktop 控制的 `host_local_cli / codex_cli / codex_read_only / Luna`；worker/executor 為 native Terra/Sol；external reviewer 仍用對方 CLI。runner 從 canonical schema v3 機械抽取 provider_result，並注入 immutable provenance。Codex-host surface 必須先 materialize 到 target Git repository；headless CLI implementation 為非預設 opt-in。
 
 ## 日常工作流
 

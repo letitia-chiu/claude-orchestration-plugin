@@ -1,259 +1,272 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/letitia-chiu/claude-orchestration-plugin/main/examples/schemas/orchestration-result.schema.json",
-  "title": "Orchestration external-agent result",
-  "description": "Fixed result envelope (schema v2, dual-host) for feasibility_verifier / implementer / adversarial_reviewer runs. This is the single canonical schema and it is written in the strict structured-output subset (every object declares additionalProperties: false and requires every property; no conditional keywords) so it can be passed verbatim to provider transports. Every role emits the same envelope: non-reviewer roles set findings/observations/suggestions/evidence_gaps to empty lists. The envelope distinguishes governance identity, host mode, execution host, host tier, role, provider, profile, model, invocation path, and session ID. Nullable scalars use the single representation type [string, null]. Role-specific semantic rules (three feasibility verdicts, empty changed_files for read-only roles, governance identity echo, host/tier/invocation-path consistency, null host_tier for external invocations, seven mandatory finding fields, Blocker/Major/Minor severity, empty reviewer collections for non-reviewer roles) are mechanically enforced by the runner's post-validation; an invalid result is classified INVALID_OUTPUT.",
+  "title": "Canonical orchestration result",
+  "description": "Schema v3 is the single canonical result SSOT. The runner supplies immutable provenance from the validated packet, invocation, Git evidence, and provider event metadata. The provider receives only the mechanically extracted $defs.provider_result schema and returns substantive work or review content. The runner validates that content, combines provenance plus provider_result, writes final-result.json, and manifests the bundle.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
-    "governance_identity",
-    "host_mode",
-    "execution_host",
-    "host_tier",
-    "invocation_path",
-    "role",
-    "provider",
-    "profile",
-    "model",
-    "verdict",
-    "summary",
-    "evidence",
-    "stop_reason",
-    "session_id",
-    "changed_files",
-    "tests",
-    "repository_state",
-    "findings",
-    "observations",
-    "suggestions",
-    "evidence_gaps"
+    "provenance",
+    "provider_result"
   ],
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [2]
+      "enum": [3]
     },
-    "governance_identity": {
-      "$ref": "#/$defs/governance_identity"
+    "provenance": {
+      "$ref": "#/$defs/provenance"
     },
-    "host_mode": {
-      "type": "string",
-      "enum": ["claude_hosted", "codex_hosted"],
-      "description": "The single active host mode this run executed under."
-    },
-    "execution_host": {
-      "type": "string",
-      "description": "Active execution host identity (e.g. claude_code, codex_desktop)."
-    },
-    "host_tier": {
-      "type": ["string", "null"],
-      "description": "Host-local tier (scout/worker/executor) for active-host executions; must be null for external_cli and headless_cli invocations (an external reviewer never reports host-local tier execution)."
-    },
-    "invocation_path": {
-      "type": "string",
-      "enum": ["active_host", "external_cli", "headless_cli"],
-      "description": "How this run was invoked. headless_cli is a non-default, separately authorized opt-in."
-    },
-    "role": {
-      "type": "string",
-      "enum": ["feasibility_verifier", "implementer", "adversarial_reviewer"]
-    },
-    "provider": {
-      "type": "string",
-      "enum": ["claude_subagent", "codex_cli", "claude_cli"]
-    },
-    "profile": {
-      "type": "string",
-      "enum": [
-        "codex_read_only",
-        "codex_workspace_write",
-        "claude_read_only",
-        "scout",
-        "worker",
-        "executor"
-      ]
-    },
-    "model": {
-      "type": "string",
-      "description": "Exact model ID the run executed with."
-    },
-    "verdict": {
-      "type": "string",
-      "description": "Role-specific verdict. feasibility_verifier must use one of PASS_FOR_IMPLEMENTATION_AUTHORIZATION / PLAN_CHANGE_REQUIRED / EVIDENCE_INSUFFICIENT (enforced by runner post-validation)."
-    },
-    "summary": {
-      "type": "string"
-    },
-    "evidence": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "file:line / command-output references backing the verdict."
-    },
-    "stop_reason": {
-      "type": ["string", "null"],
-      "description": "Null when the run completed; otherwise the stop condition that was hit."
-    },
-    "session_id": {
-      "type": ["string", "null"]
-    },
-    "changed_files": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "Repo-relative paths changed by the run. Must be empty for read-only roles (runner-enforced)."
-    },
-    "tests": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/test_entry"
-      }
-    },
-    "repository_state": {
-      "$ref": "#/$defs/repository_state"
-    },
-    "findings": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/finding"
-      },
-      "description": "adversarial_reviewer only; other roles must send []. Candidate findings; only the packet-named finding adjudicator may classify a candidate finding as established."
-    },
-    "observations": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "adversarial_reviewer only; other roles must send []. Notes that do not meet the evidence bar for a finding."
-    },
-    "suggestions": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "adversarial_reviewer only; other roles must send []. Style preferences and optional improvements. Never findings."
-    },
-    "evidence_gaps": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "adversarial_reviewer only; other roles must send []. Claims that could not be verified with the provided packet."
+    "provider_result": {
+      "$ref": "#/$defs/provider_result"
     }
   },
   "$defs": {
-    "governance_identity": {
+    "provenance": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Governance identity echoed verbatim from the task packet. Never pinned to a product by the plugin; providers may not rewrite these fields (runner post-validation compares them against the invocation).",
+      "description": "Controller-owned immutable provenance. Providers do not generate, confirm, adjudicate, or modify these fields.",
       "required": [
-        "governance_authority",
-        "authorization_issuer",
-        "acceptance_owner",
-        "finding_adjudicator",
-        "final_ratifier"
+        "governance_identity",
+        "authoritative_plan_sha",
+        "candidate_sha",
+        "target_repository_head",
+        "host_mode",
+        "execution_host",
+        "host_tier",
+        "role",
+        "provider",
+        "profile",
+        "requested_model",
+        "reported_model",
+        "invocation_path",
+        "session_id"
       ],
       "properties": {
-        "governance_authority": {
+        "governance_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "governance_authority",
+            "authorization_issuer",
+            "acceptance_owner",
+            "finding_adjudicator",
+            "final_ratifier"
+          ],
+          "properties": {
+            "governance_authority": {
+              "type": "string"
+            },
+            "authorization_issuer": {
+              "type": "string"
+            },
+            "acceptance_owner": {
+              "type": "string"
+            },
+            "finding_adjudicator": {
+              "type": "string"
+            },
+            "final_ratifier": {
+              "type": "string"
+            }
+          }
+        },
+        "authoritative_plan_sha": {
           "type": "string"
         },
-        "authorization_issuer": {
+        "candidate_sha": {
           "type": "string"
         },
-        "acceptance_owner": {
+        "target_repository_head": {
           "type": "string"
         },
-        "finding_adjudicator": {
-          "type": "string"
-        },
-        "final_ratifier": {
-          "type": "string"
-        }
-      }
-    },
-    "test_entry": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["command", "status", "output_digest"],
-      "properties": {
-        "command": {
-          "type": "string"
-        },
-        "status": {
+        "host_mode": {
           "type": "string",
-          "enum": ["passed", "failed", "skipped"]
+          "enum": ["claude_hosted", "codex_hosted"]
         },
-        "output_digest": {
-          "type": ["string", "null"],
-          "description": "Optional fingerprint (e.g. trailing lines or hash) of the actual output; null when not supplied."
-        }
-      }
-    },
-    "repository_state": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["pre", "post"],
-      "properties": {
-        "pre": {
-          "$ref": "#/$defs/git_state"
-        },
-        "post": {
-          "$ref": "#/$defs/git_state"
-        }
-      }
-    },
-    "git_state": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["head_sha", "status_short"],
-      "properties": {
-        "head_sha": {
+        "execution_host": {
           "type": "string"
         },
-        "status_short": {
+        "host_tier": {
+          "type": ["string", "null"]
+        },
+        "role": {
           "type": "string",
-          "description": "Verbatim `git status --short` output; empty string means clean."
+          "enum": ["feasibility_verifier", "implementer", "adversarial_reviewer"]
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["codex_cli", "claude_cli"]
+        },
+        "profile": {
+          "type": "string",
+          "enum": ["codex_read_only", "codex_workspace_write", "claude_read_only"]
+        },
+        "requested_model": {
+          "type": "string"
+        },
+        "reported_model": {
+          "type": ["string", "null"]
+        },
+        "invocation_path": {
+          "type": "string",
+          "enum": ["host_local_cli", "external_cli", "headless_cli"]
+        },
+        "session_id": {
+          "type": ["string", "null"]
         }
       }
     },
-    "finding": {
+    "provider_result": {
       "type": "object",
       "additionalProperties": false,
-      "description": "A candidate finding. All seven fields are mandatory; an item missing violated_requirement or repository_evidence fails runner post-validation and may only be reported as an observation or evidence gap.",
+      "description": "The only schema sent to a provider. It contains substantive result fields and no controller-owned provenance.",
       "required": [
-        "id",
-        "severity",
-        "violated_requirement",
-        "location",
-        "repository_evidence",
-        "impact",
-        "minimal_remediation_scope"
+        "verdict",
+        "summary",
+        "evidence",
+        "stop_reason",
+        "changed_files",
+        "tests",
+        "repository_state",
+        "findings",
+        "observations",
+        "suggestions",
+        "evidence_gaps"
       ],
       "properties": {
-        "id": {
+        "verdict": {
           "type": "string"
         },
-        "severity": {
-          "type": "string",
-          "enum": ["Blocker", "Major", "Minor"]
-        },
-        "violated_requirement": {
+        "summary": {
           "type": "string"
         },
-        "location": {
-          "type": "string"
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
-        "repository_evidence": {
-          "type": "string"
+        "stop_reason": {
+          "type": ["string", "null"]
         },
-        "impact": {
-          "type": "string"
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
-        "minimal_remediation_scope": {
-          "type": "string"
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command", "status", "output_digest"],
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["passed", "failed", "skipped"]
+              },
+              "output_digest": {
+                "type": ["string", "null"]
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pre", "post"],
+          "properties": {
+            "pre": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["head_sha", "status_short"],
+              "properties": {
+                "head_sha": {
+                  "type": "string"
+                },
+                "status_short": {
+                  "type": "string"
+                }
+              }
+            },
+            "post": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["head_sha", "status_short"],
+              "properties": {
+                "head_sha": {
+                  "type": "string"
+                },
+                "status_short": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "severity",
+              "violated_requirement",
+              "location",
+              "repository_evidence",
+              "impact",
+              "minimal_remediation_scope"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["Blocker", "Major", "Minor"]
+              },
+              "violated_requirement": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "repository_evidence": {
+                "type": "string"
+              },
+              "impact": {
+                "type": "string"
+              },
+              "minimal_remediation_scope": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suggestions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

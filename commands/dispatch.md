@@ -33,13 +33,19 @@ Finding adjudicator / Final ratifier /
 Host mode / Active execution host / Host-local tier / Host-local model /
 Invocation path / External reviewer provider/profile/model /
 Role / Provider/profile / Explicit model / Repository/worktree /
-Authoritative plan branch / Authoritative plan commit SHA / Canonical base SHA /
-Target SHA or batch base SHA / Goal / Allowed files / Forbidden files /
+Authoritative plan branch / Authoritative plan commit SHA /
+Release or implementation candidate SHA / Canonical base SHA /
+Target repository HEAD / Target repository status or dirty-state evidence
+(`CLEAN` or controller-produced `sha256:<digest>` of exact
+`git status --short --untracked-files=all` UTF-8 bytes) /
+Goal / Allowed files / Forbidden files /
 Required evidence / Stop conditions / Git authorization /
-External-side-effect authorization / Report schema
+Host-local execution authorization / External-side-effect authorization / Report schema
 ```
 
-Governance identity is packet-scoped: the plugin never fixes it to ChatGPT, Claude, Codex, or any product, and no provider may rewrite these fields (the runner rejects a result whose identity fields differ from the packet).
+Governance identity is packet-scoped. The provider never receives or echoes it;
+the runner injects immutable provenance after validating the substantive
+provider_result.
 
 The internal dispatch-order sections remain mandatory inside the packet body: 【Goal】【Scope】【No-go zones】【Invariant owner】【Defect-class closure】【Spec】【Acceptance】【Report format】. "Invariant owner" and "Defect-class closure" may be `not applicable` only when stated explicitly.
 
@@ -47,11 +53,12 @@ The internal dispatch-order sections remain mandatory inside the packet body: �
 
 Read `<target-project>/docs/playbook/agent-routing.json` (schema v2), take the packet's `Host mode` (exactly one of `claude_hosted` / `codex_hosted`), and resolve:
 
-- `feasibility_verifier` / `implementer` → the active host's local tier named in the packet (`role_bindings = active_host_local_tier`);
+- `feasibility_verifier` → Claude native tier, or the exact Codex-hosted `host_local_cli / scout / codex_cli / codex_read_only / gpt-5.6-luna` tuple;
+- `implementer` → the active host's native worker/executor;
 - `adversarial_reviewer` → that host mode's `external_reviewer` (claude_hosted → `codex_cli / codex_read_only`; codex_hosted → `claude_cli / claude_read_only`);
 - check the resolution matches the packet's `Provider/profile`, `Host-local tier`, and `Invocation path` fields.
 
-Stop before any spawn on: mismatch; unknown role/provider/profile/tier/host mode/invocation path; a routing file that pins a governance owner (a v1-style fixed `authority` block); a packet missing any governance identity field; a read-only role mapped to a write-capable profile; a host-local tier mapped to an external CLI; a host paired with its own provider family as reviewer; or `codex_hosted` active-host execution — **the Codex-host adapter is not implemented; fail closed, do not pretend it is available**.
+Stop before any spawn on mismatch; missing plan/candidate/target repository identity; unknown role/provider/profile/tier/path; a read-only role mapped to write; any CLI host-local tier except the exact Codex scout tuple; or a host paired with its own provider family as reviewer.
 
 ## 4. Active-host tier path (Claude-hosted: Task tool)
 
@@ -64,35 +71,44 @@ When the role binding is `active_host_local_tier` under `claude_hosted`, dispatc
 - the tier's model comes from the agent definition's pin, or the project-local `model_override` in `agent-routing.json` (update-safe; init never overwrites it); a missing model = stop, never substitute;
 - never modify the agent definitions.
 
-## 5. External CLI path (bounded runner — reviewer, and opt-in headless only)
+## 5. Bounded runner paths
 
-Only two dispatches ever reach an external CLI: the **adversarial reviewer** (after its own independent reviewer authorization) and the separately authorized **headless implementation** (`--invocation-path headless_cli`). Invoke the bounded runner — never a raw provider CLI call:
+The runner supports three non-interchangeable paths: Codex-hosted scout
+`host_local_cli`, the independently authorized adversarial reviewer
+`external_cli`, and opt-in headless implementation. Never call a raw provider
+CLI.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/orchestration_agent.py" run \
   --routing-file "<absolute-project>/docs/playbook/agent-routing.json" \
   --role "<role>" \
   --host-mode "<claude_hosted|codex_hosted>" \
-  --invocation-path "<external_cli|headless_cli>" \
+  --invocation-path "<host_local_cli|external_cli|headless_cli>" \
+  --host-tier "<scout when host_local_cli; otherwise omit>" \
   --governance-authority "<packet value>" \
   --authorization-issuer "<packet value>" \
   --acceptance-owner "<packet value>" \
   --finding-adjudicator "<packet value>" \
   --final-ratifier "<packet value>" \
   --external-authorization "ALLOW_PROVIDER_INVOCATION" \
+  [--host-local-authorization "ALLOW_HOST_LOCAL_CLI_INVOCATION"] \
   --workdir "<absolute-worktree>" \
   --task-file "<absolute-task-packet>" \
   --artifact-dir "<absolute-artifact-directory>" \
   --timeout-seconds "<authorized-timeout>" \
   --model "<explicit-model>" \
   --authoritative-plan-sha "<plan-sha>" \
+  --candidate-sha "<candidate-sha>" \
+  --target-repository-head "<target-head>" \
+  --target-repository-status "<exact status evidence>" \
   --base-sha "<base-sha>" \
   [--target-sha "<target-sha>"] \
   [--allowed-file "<repo-relative-path>"]... \
   [--forbidden-file "<repo-relative-path>"]...
 ```
 
-The runner fails closed when governance identity, host mode, or invocation path is missing; when the role/path combination is outside the dual-host contract (external feasibility, external default implementation); or when the routing file violates schema v2.
+The runner fails closed on missing provenance inputs or any path/role/profile/
+authorization tuple outside the explicit contract.
 
 - `${CLAUDE_PLUGIN_ROOT}` resolves inside plugin command content to the plugin's install directory; do not assume the variable exists in an arbitrary shell, do not hunt for the runner via target-project relative paths, do not copy the runner into the target project, and do not install hooks.
 - **Session resume:** implementer resume is currently `CAPABILITY_UNAVAILABLE` in the runner (fail closed). Do not claim resume is available and do not pass `--resume-session-id` — it becomes usable only if a future batch implements and separately authorizes it. Reviewer/cross-role resume is always refused.
@@ -112,8 +128,8 @@ The runner fails closed when governance identity, host mode, or invocation path 
 On completion of an external runner invocation, check and report — without retrying or falling back on a non-`SUCCESS` outcome:
 
 - classified outcome (SUCCESS / STOPPED / MODEL_REPORTED_BLOCKER / TIMEOUT / … as returned);
-- governance identity / host mode / execution host / host tier / invocation path as echoed in the result (any provider rewrite of the identity fields = INVALID_OUTPUT);
-- provider/profile/model actually invoked; session ID;
+- controller-owned provenance, including plan/candidate/target identities,
+  host/path/profile, requested/reported model, and session ID;
 - artifact directory path and `verify-manifest` result;
 - pre/post Git evidence and the changed-path/allowed-forbidden result;
 - final-result validity against the report schema;

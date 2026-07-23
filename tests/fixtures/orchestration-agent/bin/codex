@@ -48,14 +48,30 @@ def main():
 
     mode = os.environ.get("FAKE_CLI_MODE", "success")
     if mode == "success":
-        emit({"type": "item", "text": "fake codex event"})
+        emit(
+            {
+                "type": "thread.started",
+                "thread_id": os.environ.get(
+                    "FAKE_SESSION_ID", "00000000-0000-0000-0000-000000000001"
+                ),
+                "model": os.environ.get("FAKE_REPORTED_MODEL", "fake-model-1"),
+            }
+        )
         write_final()
         return 0
     if mode == "write-file":
         target = Path(os.environ["FAKE_WRITE_PATH"])
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("written by fake agent\n", encoding="utf-8")
-        emit({"type": "item", "text": "wrote a file"})
+        emit(
+            {
+                "type": "thread.started",
+                "thread_id": os.environ.get(
+                    "FAKE_SESSION_ID", "00000000-0000-0000-0000-000000000001"
+                ),
+                "model": os.environ.get("FAKE_REPORTED_MODEL", "fake-model-1"),
+            }
+        )
         write_final()
         return 0
     if mode == "nonzero":

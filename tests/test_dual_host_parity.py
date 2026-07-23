@@ -52,14 +52,17 @@ COMMON_FIELDS = (
     "Repository/worktree",
     "Authoritative plan branch",
     "Authoritative plan commit SHA",
+    "Release／implementation candidate SHA",
     "Canonical base SHA",
-    "Target SHA or batch base SHA",
+    "Target repository HEAD",
+    "Target repository status／dirty-state evidence",
     "Goal",
     "Allowed files",
     "Forbidden files",
     "Required evidence",
     "Stop conditions",
     "Git authorization",
+    "Host-local execution authorization",
     "External-side-effect authorization",
     "Report schema",
 )
@@ -77,7 +80,7 @@ REQUIRED_README_LITERALS = (
     "python3 scripts/init_codex_host.py",
     "--target /absolute/path/to/target-repository",
     "--check",
-    "21",
+    "20",
     "no-overwrite",
     "`AGENTS.md`",
     "`headless_cli`",
@@ -91,7 +94,6 @@ REQUIRED_README_LITERALS = (
 
 EXPECTED_INVENTORY = {
     "AGENTS.md",
-    ".codex/agents/scout.toml",
     ".codex/agents/worker.toml",
     ".codex/agents/executor.toml",
     ".agents/skills/orchestration-codex-host/SKILL.md",
@@ -165,14 +167,17 @@ class RoutingParityTests(unittest.TestCase):
         self.assertEqual(set(hosts["claude_hosted"]["local_tiers"]), expected)
         self.assertEqual(set(hosts["codex_hosted"]["local_tiers"]), expected)
 
-    def test_claude_tiers_are_native_and_codex_tiers_are_native(self):
+    def test_claude_tiers_are_native_and_codex_scout_is_host_local_cli(self):
         hosts = routing()["host_modes"]
         self.assertEqual(
             {tier["provider"] for tier in hosts["claude_hosted"]["local_tiers"].values()},
             {"claude_native"},
         )
+        codex = hosts["codex_hosted"]["local_tiers"]
+        self.assertEqual(codex["scout"]["provider"], "codex_cli")
+        self.assertEqual(codex["scout"]["invocation_path"], "host_local_cli")
         self.assertEqual(
-            {tier["provider"] for tier in hosts["codex_hosted"]["local_tiers"].values()},
+            {codex[tier]["provider"] for tier in ("worker", "executor")},
             {"codex_native"},
         )
 
@@ -260,10 +265,10 @@ class SharedContractParityTests(unittest.TestCase):
             self.assertIn("push", text)
             self.assertIn("merge", text)
 
-    def test_one_result_envelope_supports_both_hosts(self):
+    def test_one_canonical_result_schema_supports_both_hosts(self):
         schema = json.loads(read(SCHEMA_PATH))
         self.assertEqual(
-            schema["properties"]["host_mode"]["enum"],
+            schema["$defs"]["provenance"]["properties"]["host_mode"]["enum"],
             ["claude_hosted", "codex_hosted"],
         )
         for field in (
@@ -275,10 +280,16 @@ class SharedContractParityTests(unittest.TestCase):
             "role",
             "provider",
             "profile",
-            "model",
+            "requested_model",
+            "reported_model",
             "session_id",
         ):
-            self.assertIn(field, schema["required"])
+            self.assertIn(field, schema["$defs"]["provenance"]["required"])
+        self.assertEqual(schema["properties"]["schema_version"]["enum"], [3])
+        self.assertNotIn(
+            "governance_identity",
+            schema["$defs"]["provider_result"]["properties"],
+        )
 
     def test_claude_agent_models_and_responsibilities_are_distinct(self):
         agents = [
@@ -288,16 +299,23 @@ class SharedContractParityTests(unittest.TestCase):
         self.assertEqual(len({fields["model"] for fields, _ in agents}), 3)
         self.assertEqual(len({fields["description"] for fields, _ in agents}), 3)
 
-    def test_codex_agent_models_and_responsibilities_are_distinct(self):
+    def test_codex_native_implementation_agents_are_distinct(self):
         agents = []
-        for tier in ("scout", "worker", "executor"):
+        for tier in ("worker", "executor"):
             with (CODEX_AGENTS / ("%s.toml" % tier)).open("rb") as handle:
                 agents.append(tomllib.load(handle))
-        self.assertEqual(len({agent["model"] for agent in agents}), 3)
-        self.assertEqual(len({agent["description"] for agent in agents}), 3)
+        self.assertEqual(len({agent["model"] for agent in agents}), 2)
+        self.assertEqual(len({agent["description"] for agent in agents}), 2)
         self.assertEqual(
             [agent["model"] for agent in agents],
-            ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+            ["gpt-5.6-terra", "gpt-5.6-sol"],
+        )
+        self.assertFalse((CODEX_AGENTS / "scout.toml").exists())
+        self.assertEqual(
+            routing()["host_modes"]["codex_hosted"]["local_tiers"]["scout"][
+                "model_override"
+            ],
+            "gpt-5.6-luna",
         )
 
     def test_both_adapter_entries_are_repository_discoverable(self):
@@ -309,10 +327,10 @@ class SharedContractParityTests(unittest.TestCase):
         ):
             self.assertTrue(path.is_file(), path)
 
-    def test_materializer_inventory_is_the_complete_21_file_contract(self):
+    def test_materializer_inventory_is_the_complete_20_file_contract(self):
         module = load_materializer()
         self.assertEqual(set(module.INVENTORY), EXPECTED_INVENTORY)
-        self.assertEqual(len(module.INVENTORY), 21)
+        self.assertEqual(len(module.INVENTORY), 20)
 
     def test_target_installed_shared_contracts_are_byte_identical(self):
         with tempfile.TemporaryDirectory(
@@ -385,7 +403,10 @@ class DocumentationParityTests(unittest.TestCase):
         for path in READMES:
             text = read(path)
             self.assertIn("Real smoke", text)
-            self.assertRegex(text, r"Real smoke.{0,40}(pending|仍待|未実施)")
+            self.assertRegex(
+                text,
+                r"(Real smoke|real recheck|仍待 real recheck|未実施)",
+            )
 
     def test_codex_install_and_conflict_rules_are_in_every_readme(self):
         for path in READMES:
@@ -393,7 +414,7 @@ class DocumentationParityTests(unittest.TestCase):
             for marker in (
                 "python3 scripts/init_codex_host.py",
                 "--check",
-                "21",
+                "20",
                 "no-overwrite",
                 "AGENTS.md",
                 "conflict",
@@ -416,7 +437,7 @@ class DocumentationParityTests(unittest.TestCase):
         for marker in (
             "scripts/init_codex_host.py",
             "--check",
-            "21-file",
+            "20-file",
             "no-overwrite",
             "Pending real evidence",
             "Codex Plugin Directory package",

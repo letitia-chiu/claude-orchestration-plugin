@@ -27,7 +27,6 @@ _spec.loader.exec_module(distribution)
 INVENTORY = tuple(distribution.INVENTORY)
 PORTABLE_SURFACES = (
     "AGENTS.md",
-    ".codex/agents/scout.toml",
     ".codex/agents/worker.toml",
     ".codex/agents/executor.toml",
     ".agents/skills/orchestration-codex-host/SKILL.md",
@@ -113,7 +112,7 @@ class InstallBehaviorTests(DistributionTestCase):
         repo = self.make_repo()
         result = self.run_cli(repo)
         self.assertEqual(result.returncode, distribution.EXIT_OK, result.stderr)
-        self.assertIn("INSTALLED: 21 created, 0 unchanged, 21 total", result.stdout)
+        self.assertIn("INSTALLED: 20 created, 0 unchanged, 20 total", result.stdout)
 
     def test_every_required_target_file_exists(self):
         repo = self.make_repo()
@@ -137,7 +136,7 @@ class InstallBehaviorTests(DistributionTestCase):
         result = self.run_cli(repo)
         after = snapshot_tree(repo, exclude_git=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("INSTALLED: 0 created, 21 unchanged, 21 total", result.stdout)
+        self.assertIn("INSTALLED: 0 created, 20 unchanged, 20 total", result.stdout)
         self.assertEqual(after, before)
 
     def test_identical_existing_file_mtime_is_not_rewritten(self):
@@ -157,7 +156,7 @@ class InstallBehaviorTests(DistributionTestCase):
         result = self.run_cli(repo)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(missing.read_bytes(), (ROOT / "docs/playbook/codex-host.md").read_bytes())
-        self.assertIn("INSTALLED: 1 created, 20 unchanged, 21 total", result.stdout)
+        self.assertIn("INSTALLED: 1 created, 19 unchanged, 20 total", result.stdout)
 
     def test_source_root_is_derived_from_script_not_cwd(self):
         repo = self.make_repo()
@@ -209,7 +208,7 @@ class CheckModeTests(DistributionTestCase):
         result = self.run_cli(repo, check=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.count("IDENTICAL "), len(INVENTORY))
-        self.assertIn("OK: all 21 files are identical", result.stdout)
+        self.assertIn("OK: all 20 files are identical", result.stdout)
 
     def test_check_missing_is_nonzero_and_writes_nothing(self):
         repo = self.make_repo()
@@ -374,7 +373,6 @@ class SecurityAndPortabilityTests(DistributionTestCase):
             "scripts/orchestration_agent.py",
             "docs/playbook/agent-routing.json",
             "examples/schemas/orchestration-result.schema.json",
-            ".codex/agents/scout.toml",
             ".codex/agents/worker.toml",
             ".codex/agents/executor.toml",
         ):

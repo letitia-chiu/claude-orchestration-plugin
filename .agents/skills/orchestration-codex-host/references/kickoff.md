@@ -19,17 +19,20 @@ Collect the execution identity:
 
 - host mode: `codex_hosted`
 - active execution host: `codex_desktop`
-- invocation path: `active_host`
+- invocation path: `host_local_cli` for scout; `active_host` for worker/executor
 - host-local tier: `scout`, `worker`, or `executor`
 - exact host-local model
 - repository and absolute worktree
-- current branch and HEAD
+- authoritative plan SHA
+- plugin/release implementation candidate SHA
+- target repository HEAD
+- target repository status/dirty-state evidence
 - authorization statement and issuer
 
-Then materialize the full common 27-field task packet, including the plan/base
+Then materialize the full C2 packet, including the plan/base
 identities, goal, exact allowed and forbidden files, required evidence,
-acceptance commands, stop conditions, Git authorization, external-side-effect
-authorization, and report schema.
+acceptance commands, stop conditions, Git authorization, host-local execution
+authorization, external-side-effect authorization, and report schema.
 
 ## Stop boundary
 

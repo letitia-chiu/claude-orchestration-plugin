@@ -36,18 +36,21 @@
       "adapter_status": "implemented",
       "local_tiers": {
         "scout": {
-          "provider": "codex_native",
-          "profile": "scout",
-          "model_override": null
+          "provider": "codex_cli",
+          "profile": "codex_read_only",
+          "invocation_path": "host_local_cli",
+          "model_override": "gpt-5.6-luna"
         },
         "worker": {
           "provider": "codex_native",
           "profile": "worker",
+          "invocation_path": "active_host",
           "model_override": null
         },
         "executor": {
           "provider": "codex_native",
           "profile": "executor",
+          "invocation_path": "active_host",
           "model_override": null
         }
       },

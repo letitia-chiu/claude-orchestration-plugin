@@ -6,7 +6,8 @@ Version: **0.7.0**
 
 This repository provides one governance-neutral orchestration contract with two
 active-host adapters. Claude Desktop / Claude Code can run the workflow with
-Claude-native agents, and Codex Desktop can run it with Codex-native agents.
+Claude-native agents. Codex Desktop uses a Desktop-controlled host-local CLI
+scout and native worker/executor agents.
 Either host may hand a frozen candidate to the other provider's CLI for a fresh,
 read-only adversarial review.
 
@@ -29,15 +30,17 @@ reviewer cannot infer those powers from its role.
 | Host mode | Active host | Host-local tiers | External reviewer |
 |---|---|---|---|
 | `claude_hosted` | Claude Desktop / Claude Code | `scout` / `worker` / `executor` using Claude-native model tiers | Codex CLI / `codex_read_only` |
-| `codex_hosted` | Codex Desktop | `scout` / `worker` / `executor`, defaulting to Luna / Terra / Sol | Claude CLI / `claude_read_only` |
+| `codex_hosted` | Codex Desktop | scout = `host_local_cli` Codex CLI / Luna; worker/executor = native Terra/Sol | Claude CLI / `claude_read_only` |
 
 `scout` handles read-only inventory and narrow feasibility, `worker` handles a
 specified implementation with one invariant or defect family, and `executor`
 owns cross-module or high-risk contractual closure. Higher capability never
 adds file, Git, acceptance, adjudication, ratification, or governance authority.
 
-Feasibility and implementation always use the selected active host's native
-tier. The reciprocal CLI path is reviewer-only. The implementer cannot start
+Codex-hosted feasibility uses the separately authorized Desktop-controlled
+`host_local_cli / codex_cli / codex_read_only / gpt-5.6-luna` tier.
+Worker/executor implementation stays native Desktop Terra/Sol. This scout path
+is not an external reviewer or fallback. The implementer cannot start
 the reviewer, and there is no automatic reviewer dispatch, retry, fallback,
 model switching, or role chaining. `headless_cli` implementation is a
 non-default opt-in that requires separate authorization.
@@ -88,8 +91,8 @@ python3 scripts/init_codex_host.py \
 ```
 
 The target must be an existing absolute Git repository path. The materializer
-installs exactly 21 repository-local files: `AGENTS.md`, the three
-`.codex/agents` definitions, the Codex-host skill and references, the shared
+installs exactly 20 repository-local files: `AGENTS.md`, the two native
+`.codex/agents` worker/executor definitions, the Codex-host skill and references, the shared
 playbook/routing/schema/task packets, and the Claude reviewer runner.
 
 Installation is transactional and no-overwrite. Missing files are copied,
@@ -108,17 +111,18 @@ target's own `scripts/orchestration_agent.py`,
 
 ## Safety and evidence contract
 
-Every authorized packet carries the authoritative plan identity, explicit
-governance and packet identity, host/tier/model identity, allowed and forbidden
+Every authorized packet separately carries the authoritative plan SHA,
+release/implementation candidate SHA, target repository HEAD and dirty-state
+evidence, explicit governance identity, host/tier/model identity, allowed and forbidden
 files, acceptance commands, stop conditions, and separate execution, Git, and
 external-provider authorizations. A real CLI call requires
 `ALLOW_PROVIDER_INVOCATION` in both the packet and runner command; reviewer
 authorization is always independent and starts a fresh session.
 
-Results use one strict structured envelope with role/provider/model/session
-identity, transcript, pre/post Git evidence, changed files, tests, and artifact
-manifest. Reviewer findings remain candidates until the packet-named
-adjudicator decides them.
+The canonical schema v3 is one SSOT. Providers receive only its mechanically
+extracted `provider_result`; the runner injects controller-owned immutable
+provenance and records requested/reported model separately. Reviewer findings
+remain candidates until the packet-named adjudicator decides them.
 
 ## Capability status
 
@@ -132,10 +136,11 @@ events and exercised timeout, process-group termination, partial transcripts,
 and manifests. C1 fixed two discovered real-CLI contract defects, but the fixed
 paths have not yet been rechecked with a real CLI.
 
-Real smoke remains pending for Claude-hosted → Codex reviewer, Codex-hosted →
-Claude reviewer, Luna/Terra/Sol custom-agent spawning, three distinct child
-thread/model identities, scout sandbox precedence, and embedded-versus-
-standalone Codex runtime parity. Native per-file sandbox enforcement and a
+Real smoke proved that the former native Codex scout sandbox did not enforce
+read-only in the observed embedded runtime, so that default was retired. Real
+recheck remains pending for Luna CLI scout, native Terra/Sol tasks, both
+schema-v3 reciprocal reviewers, and embedded-versus-standalone Codex runtime
+version skew. Native per-file sandbox enforcement and a
 native Plugin Directory package are unavailable.
 This project is not a Xinghui Runtime adapter.
 

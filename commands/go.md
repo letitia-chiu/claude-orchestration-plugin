@@ -39,13 +39,15 @@ This command is the formal start-work signal that `/orchestration:kickoff` waits
 
 3. **Resolve routing, then execute through the dispatch contract.** Determine the executable role for this authorization (`feasibility_verifier`, `implementer`, or `adversarial_reviewer` — or orchestrator-owned work that needs no dispatch), read the target project's `docs/playbook/agent-routing.json` (schema v2), and resolve through the dual-host contract:
    - **Claude-hosted feasibility/implementation** runs on the active Claude host via the Task/agent path, using the host's own scout/worker/executor tier named in the authorization — never an external CLI by default;
+   - **Codex-hosted feasibility** runs only as `host_local_cli / scout / codex_cli / codex_read_only / gpt-5.6-luna`, with matching packet and CLI `ALLOW_HOST_LOCAL_CLI_INVOCATION`; its external reviewer authorization must remain separate;
+   - **Codex-hosted implementation** remains native Desktop worker/executor;
    - **the adversarial reviewer** resolves to the opposing provider's CLI (claude_hosted → Codex CLI read-only) and requires its own independent reviewer authorization — `/go` for an implementation batch never implies it;
    - **headless CLI implementation** requires the authorization to name `headless_cli` explicitly — it is never inferred;
-   - **`codex_hosted` execution fails closed**: the Codex-host adapter is not implemented; do not pretend it is available.
+   - validate authoritative plan SHA, release/implementation candidate SHA, target repository HEAD, and target dirty-state evidence independently; status evidence is `CLEAN` or the controller-produced `sha256:<digest>` of exact `git status --short --untracked-files=all` UTF-8 bytes, and none of these identities substitutes for another.
 
    Hand off per the `/orchestration:dispatch` contract. Unknown or unsafe routing stops before any spawn. Do not re-ask for permission for the exact authorized scope — this command *is* that permission.
 
-4. **Missing authority = stop.** If the authoritative plan identity fields are missing, do not substitute a "I believe you meant…" plus an ordinary confirmation. Stop and list exactly which authority fields are missing (governance identity, host mode, host-local tier, invocation path, branch, plan commit SHA, canonical base SHA, role/batch, allowed/forbidden files, acceptance, stop conditions, Git authorization, External-side-effect authorization).
+4. **Missing authority = stop.** If identity fields are missing, stop and list them, including governance identity, plan SHA, candidate SHA, target repository HEAD, target dirty-state evidence, host/tier/path, scope, Git authorization, host-local execution authorization, and external-side-effect authorization.
 
 Scope rules:
 

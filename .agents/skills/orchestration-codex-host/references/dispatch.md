@@ -2,22 +2,25 @@
 
 Dispatch has two non-interchangeable paths.
 
-## `active_host`
+## Active-host local tiers
 
-Repository feasibility and implementation remain inside Codex Desktop:
+Codex Desktop controls both paths, but their execution mechanisms differ:
 
-| Tier | Native agent | Default model | Use |
-|---|---|---|---|
-| scout | `.codex/agents/scout.toml` | `gpt-5.6-luna` | read-only inventory and narrow feasibility |
-| worker | `.codex/agents/worker.toml` | `gpt-5.6-terra` | one specified invariant or defect family |
-| executor | `.codex/agents/executor.toml` | `gpt-5.6-sol` | cross-module, high-risk, or contractual closure |
+| Tier | Invocation | Provider/profile | Default model | Use |
+|---|---|---|---|---|
+| scout | `host_local_cli` | `codex_cli / codex_read_only` | `gpt-5.6-luna` | read-only inventory and narrow feasibility |
+| worker | `active_host` | `.codex/agents/worker.toml` / `codex_native` | `gpt-5.6-terra` | one specified invariant or defect family |
+| executor | `active_host` | `.codex/agents/executor.toml` / `codex_native` | `gpt-5.6-sol` | cross-module, high-risk, or contractual closure |
 
-Create a distinct Codex Desktop child thread/task for the selected tier and
-preserve its thread UUID and actual model identity. The active-host path never
-uses the external runner. The PATH `codex` CLI is not the active host.
+Scout requires both packet and runner CLI to carry
+`ALLOW_HOST_LOCAL_CLI_INVOCATION`; its packet must keep external provider
+authorization at `NONE`. It uses runner mutation detection, transcript, Git
+evidence, and manifest, but remains an active-host local tier—not a reviewer,
+fallback, or source of governance authority. The native scout TOML was retired
+because its observed sandbox did not enforce read-only.
 
-Do not spawn these agents merely to validate this adapter. Their first real
-spawn requires separate smoke authorization.
+Worker/executor use distinct Codex Desktop child tasks; preserve thread UUID and
+actual model identity. The PATH Codex CLI is not the active host.
 
 ## `external_cli`
 
@@ -43,13 +46,18 @@ release.
 
 Invoke the reviewer from the target repository root with the target-installed
 `scripts/orchestration_agent.py` and
-`docs/playbook/agent-routing.json`. The runner resolves
-`examples/schemas/orchestration-result.schema.json` from that same target root;
-no plugin-checkout path is part of the invocation.
+`docs/playbook/agent-routing.json`. The runner mechanically extracts
+`$defs.provider_result` from the target-local
+`examples/schemas/orchestration-result.schema.json`; the provider never
+receives or echoes controller-owned provenance. The runner creates canonical
+`provenance + provider_result` output. No plugin-checkout path is part of the
+invocation.
 
 ## Prohibited routing
 
-- feasibility or implementation through the external runner;
+- feasibility through any path except the exact Codex-hosted scout
+  `host_local_cli` tuple;
+- worker/executor implementation through the external runner;
 - an implementer starting its reviewer;
 - automatic fallback, retry, model switching, role chaining, or session resume;
 - treating a missing model as permission to substitute another model;

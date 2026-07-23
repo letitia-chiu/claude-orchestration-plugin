@@ -20,12 +20,12 @@ Follow the kickoff flow:
 3. **Questions**: ask only within the five categories, max 3 questions, each with a recommended option (interview step 2's question threshold).
 4. **Plan**: write up the parts most likely to change and most in need of confirmation first; flag risk gates (situations where you must stop); preserve invariant-owner assignment and defect-class closure requirements for any known findings; then write the **dispatch breakdown by workflow role**, not by provider name:
    - local/read-only reconnaissance (scout — the active host's fast read-only tier);
-   - `feasibility_verifier` — repository-local feasibility check against an authoritative plan commit, run by the **active host's own local tier** (never an external CLI);
+   - `feasibility_verifier` — repository-local feasibility check; under `codex_hosted`, this is the Desktop-controlled `host_local_cli / codex_cli / codex_read_only / Luna` tier, not an external reviewer;
    - `implementer` — the authorized implementation batches, run by the **active host's own worker/executor tier**;
    - `adversarial_reviewer` — fresh-context, read-only review of the candidate result by the **opposing provider's CLI** (claude_hosted → Codex CLI; codex_hosted → Claude CLI), requiring its own independent authorization;
    - orchestrator-owned judgment (things too small or too judgment-heavy to dispatch).
 
-   The routing contract is the target project's `docs/playbook/agent-routing.json` (schema v2: governance-neutral, host-aware, tier-aware). Do not hardcode a provider as the routing rule, and never treat an external CLI as the default implementer or the host's own CLI as its own reviewer. Headless CLI implementation (`headless_cli_implementation`) exists only as a non-default, separately authorized opt-in. If the plan proposes `codex_hosted` execution, state that the Codex-host adapter is not implemented and the plan must fail closed there.
+   The routing contract is the target project's `docs/playbook/agent-routing.json` (schema v2: governance-neutral, host-aware, tier-aware). Codex-hosted scout is the exact Desktop-controlled host-local CLI tuple; worker/executor remain native. Never confuse scout authorization with external reviewer authorization or treat either as fallback.
 
 **Plan identity requirement.** A kickoff plan draft is a draft. Conversation text alone is not execution authority. State in the plan that before formal `/orchestration:go` execution, the plan must exist with a verifiable planning commit identity, and must carry at least these fields:
 
@@ -41,6 +41,9 @@ Host-local tier plan (which scout/worker/executor tiers for which batches)
 Invocation path per role (active_host | external_cli | headless_cli)
 Authoritative plan branch
 Authoritative plan commit SHA
+Release / implementation candidate SHA
+Target repository HEAD
+Target repository status / dirty-state evidence
 Canonical base SHA
 Target branch/worktree
 Current authorized batch or role
@@ -50,6 +53,7 @@ Forbidden files
 Acceptance commands
 Stop conditions
 Git authorization
+Host-local execution authorization
 External-side-effect authorization
 Role map (role -> binding, from agent-routing.json schema v2)
 ```

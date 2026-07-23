@@ -6,7 +6,8 @@ Version: **0.7.0**
 
 本 repository 提供一份 governance-neutral 統籌契約與兩個 active-host
 adapter。Claude Desktop／Claude Code 可用 Claude-native agents 執行工作流；
-Codex Desktop 則可用 Codex-native agents。任一 host 都可把凍結後的候選內容，
+Codex Desktop 則使用 Desktop-controlled host-local CLI scout 與 native
+worker／executor。任一 host 都可把凍結後的候選內容，
 交給對方 provider 的 CLI 做 fresh、read-only 對抗式覆核。
 
 核心分離如下：
@@ -27,15 +28,17 @@ adjudicator 與 final ratifier；host、model 或 reviewer 都不能從角色自
 | Host mode | Active host | Host-local tiers | External reviewer |
 |---|---|---|---|
 | `claude_hosted` | Claude Desktop／Claude Code | Claude-native `scout` / `worker` / `executor` | Codex CLI / `codex_read_only` |
-| `codex_hosted` | Codex Desktop | `scout` / `worker` / `executor`，預設 Luna / Terra / Sol | Claude CLI / `claude_read_only` |
+| `codex_hosted` | Codex Desktop | scout＝`host_local_cli` Codex CLI／Luna；worker／executor＝native Terra／Sol | Claude CLI / `claude_read_only` |
 
 `scout` 負責唯讀 inventory 與窄範圍 feasibility；`worker` 負責單一 invariant
 或 defect family 的已規格化 implementation；`executor` 負責跨模組或高風險契約
 closure。較高檔位不會增加檔案、Git、acceptance、adjudication、ratification 或
 governance authority。
 
-Feasibility 與 implementation 永遠走 active host 的 native tier；互惠 CLI
-路徑只供 reviewer 使用。Implementer 不得啟動 reviewer，也沒有 automatic
+Codex-hosted feasibility 固定走另行授權的 Desktop-controlled
+`host_local_cli / codex_cli / codex_read_only / gpt-5.6-luna`；worker／executor
+仍為 native Desktop Terra／Sol。scout 不是 external reviewer 或 fallback。
+Implementer 不得啟動 reviewer，也沒有 automatic
 reviewer dispatch、retry、fallback、model switching 或 role chaining。
 `headless_cli` implementation 是非預設 opt-in，必須另行授權。
 
@@ -83,7 +86,8 @@ python3 scripts/init_codex_host.py \
 ```
 
 Target 必須是既存、absolute path 的 Git repository。Materializer 安裝恰好
-21 個 repository-local 檔案：`AGENTS.md`、三個 `.codex/agents`、Codex-host
+20 個 repository-local 檔案：`AGENTS.md`、兩個 native `.codex/agents`
+（worker／executor）、Codex-host
 skill 與 references、shared playbook／routing／schema／task packets，以及
 Claude reviewer runner。
 
@@ -100,15 +104,16 @@ package。Codex-hosted reviewer 使用 target 內的
 
 ## Safety 與 evidence contract
 
-每張已授權 packet 都包含 authoritative plan identity、明示的 governance 與
-packet identity、host／tier／model、allowed／forbidden files、acceptance
+每張已授權 packet 都分開包含 authoritative plan SHA、release／implementation
+candidate SHA、target repository HEAD 與 dirty-state evidence、明示的
+governance identity、host／tier／model、allowed／forbidden files、acceptance
 commands、stop conditions，以及彼此分離的 execution、Git、external-provider
 authorization。真實 CLI 呼叫要求 packet 與 runner command 都帶
 `ALLOW_PROVIDER_INVOCATION`；reviewer authorization 永遠獨立並啟動 fresh session。
 
-結果共用 strict structured envelope，記錄 role／provider／model／session、
-transcript、pre/post Git evidence、changed files、tests 與 artifact manifest。
-Reviewer findings 在 packet 指定的 adjudicator 裁定前都只是 candidate。
+Canonical schema v3 是唯一 SSOT。Provider 只收到機械抽出的
+`provider_result`；runner 注入 controller-owned immutable provenance，並分開
+記錄 requested／reported model。Reviewer findings 在裁定前都只是 candidate。
 
 ## Capability status
 
@@ -121,9 +126,10 @@ no-overwrite distribution。
 並跑過 timeout、process-group termination、partial transcript 與 manifest。
 C1 已修正兩個 real-CLI contract defect，但修正後尚未用 real CLI recheck。
 
-Real smoke 仍待驗證：Claude-hosted → Codex reviewer、Codex-hosted → Claude
-reviewer、Luna／Terra／Sol custom-agent spawn、三個不同 child thread／model
-identity、scout sandbox precedence、embedded／standalone Codex runtime parity。
+Real smoke 已證明舊 native Codex scout sandbox 在觀察到的 embedded runtime
+沒有形成 read-only 邊界，因此該預設已撤除。仍待 real recheck：Luna CLI
+scout、native Terra／Sol、兩邊 schema-v3 reviewer，以及 embedded／standalone
+Codex runtime version skew。
 目前沒有 native per-file sandbox enforcement，也沒有 native Plugin Directory
 package。本專案不是 Xinghui Runtime adapter。
 

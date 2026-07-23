@@ -10,17 +10,19 @@ Record:
 - authority identity and authoritative plan identity;
 - current control-window authorization;
 - Codex Desktop host thread UUID;
-- native child thread/task UUID, or `not applicable`;
+- native child thread/task UUID, or host-local CLI session ID for scout;
 - selected tier, configured model, and actual model evidence;
 - exact worktree, pre/post branch, HEAD, status, and ancestry;
 - changed files and diff scope;
 - every acceptance command and actual result;
 - Git authorization and every Git action taken;
 - deviations, unsupported capabilities, and evidence gaps;
-- external runner manifest: `not applicable`.
+- host-local scout transcript/Git evidence/manifest, or `not applicable` for
+  native worker/executor.
 
-If real child spawn/model identity or sandbox precedence was not tested, mark it
-`pending`; do not infer it from static TOML.
+Record requested and CLI-reported model separately. The native scout sandbox is
+not an accepted safety boundary; mark the corrected Luna CLI recheck `pending`
+until independently authorized and executed.
 
 ## External-review evidence
 
@@ -32,6 +34,10 @@ Only after independent review authorization, record separately:
 - candidate findings, observations, suggestions, and evidence gaps;
 - the packet-named finding adjudicator;
 - adjudication status for each candidate finding.
+
+The canonical final artifact records controller-owned immutable provenance
+separately from the provider's substantive result. Never ask the reviewer to
+confirm or endorse provenance.
 
 The reviewer does not close findings by assertion and cannot become the
 acceptance owner or final ratifier.

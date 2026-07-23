@@ -1,10 +1,10 @@
 # Task Packet — Codex-Hosted Gate
 
-> Formal 27-field packet for one Codex Desktop active-host feasibility or
+> Formal C2 packet for one Codex Desktop host-local feasibility or native
 > implementation Gate. Replace every `<...>` value from the current control
 > window. Packet completeness is not authorization.
 
-## Common header（27 fields required）
+## Common header（C2 identity fields required）
 
 | Field | Value |
 |---|---|
@@ -17,24 +17,27 @@
 | Active execution host | `codex_desktop` |
 | Host-local tier | `<scout, worker, or executor>` |
 | Host-local model | `<gpt-5.6-luna, gpt-5.6-terra, or gpt-5.6-sol matching the selected tier, unless an explicit project-local override is authorized>` |
-| Invocation path | `active_host` |
+| Invocation path | scout: `host_local_cli`; worker/executor: `active_host` |
 | External reviewer provider/profile/model | `not applicable` — the implementer cannot dispatch a reviewer; review needs a new packet and authorization |
 | Role | `<feasibility_verifier or implementer>` |
-| Provider/profile | `codex_native / <scout, worker, or executor>` |
+| Provider/profile | scout: `codex_cli / codex_read_only`; worker/executor: `codex_native / <worker or executor>` |
 | Explicit model | `<exact model ID>` |
 | Repository/worktree | `<absolute authorized worktree path>` |
 | Authoritative plan branch | `<plan branch>` |
 | Authoritative plan commit SHA | `<exact plan SHA>` |
+| Release／implementation candidate SHA | `<exact plugin/release candidate SHA>` |
 | Canonical base SHA | `<exact canonical base SHA>` |
-| Target SHA or batch base SHA | `<exact pre-Gate HEAD>` |
+| Target repository HEAD | `<exact target pre-Gate HEAD>` |
+| Target repository status／dirty-state evidence | `<CLEAN，或 controller 對 exact git status --short --untracked-files=all UTF-8 bytes 產生的 sha256:<digest>>` |
 | Goal | `<one Gate, one observable outcome>` |
 | Allowed files | `<exhaustive repo-relative paths; every unlisted path is forbidden>` |
 | Forbidden files | `<explicit forbidden paths>`; fixed addition: every path not in Allowed files |
 | Required evidence | `<pre/post Git, changed files, tier/thread/model identity, commands, tests, expected results>` |
 | Stop conditions | `<Gate-specific stops>`; fixed: identity mismatch, missing authorization, unavailable model, forbidden-file need, plan/repository conflict, or ambiguous specification |
 | Git authorization | `<NONE by default, or one exact separately authorized Git action; commit never implies push/PR/merge>` |
+| Host-local execution authorization | scout: `ALLOW_HOST_LOCAL_CLI_INVOCATION`; worker/executor: `NONE` |
 | External-side-effect authorization | `NONE` — active-host work cannot invoke Claude CLI or another provider |
-| Report schema | `examples/schemas/orchestration-result.schema.json` with `invocation_path=active_host` |
+| Report schema | schema v3 `examples/schemas/orchestration-result.schema.json`; provider/agent returns substantive result only |
 
 ## Fixed contract
 
@@ -42,7 +45,8 @@
   independent identities.
 - Read the authoritative plan at the exact SHA and verify the exact worktree,
   branch, HEAD, and clean status before work.
-- `scout` is read-only inventory/feasibility. `worker` owns one specified
+- `scout` is Desktop-controlled host-local read-only CLI inventory/feasibility;
+  the retired native scout sandbox is not a safety boundary. `worker` owns one specified
   invariant or defect family. `executor` owns authorized cross-module or
   high-risk closure. A higher model tier grants no additional authority.
 - Work only in Allowed files, honor Forbidden files, run only the named
@@ -51,8 +55,8 @@
   commit, push, pull request, merge, amend, rebase, tag, branch, and worktree
   writes.
 - Conversation memory and previous sessions are not authorization.
-- The active host never calls the external runner for feasibility or
-  implementation. The PATH Codex CLI is not the active host.
+- Codex Desktop explicitly calls the runner only for the exact host-local scout
+  tuple. Worker/executor never use it. The PATH Codex CLI is not the active host.
 - The implementer cannot dispatch a reviewer. Claude CLI review requires a
   fresh `adversarial_reviewer` packet, independent authorization, and
   `ALLOW_PROVIDER_INVOCATION` in both packet and runner CLI.
@@ -68,7 +72,6 @@ native child thread/task UUID, selected tier, configured and actual model,
 pre/post Git evidence, exact changed files, test commands/results, Git actions,
 unsupported capabilities, and evidence gaps.
 
-Do not infer real-smoke success from static configuration. Luna/Terra/Sol real
-spawn, distinct child/model evidence, scout sandbox precedence,
-embedded/standalone runtime parity, and real Claude reviewer evidence remain
-pending separate authorization.
+Do not infer corrective recheck success from static configuration. Luna CLI
+scout, Terra/Sol native execution, schema-v3 reciprocal reviewers, and runtime
+version-skew behavior remain pending separate authorization.

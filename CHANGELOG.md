@@ -11,22 +11,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Governance-neutral routing schema v2 with two active hosts, one packet-defined
   governance identity, and explicit separation between governance authority,
   active execution host, host-local tier, and external reviewer.
-- Host-native `scout` / `worker` / `executor` tiers for both Claude-hosted and
-  Codex-hosted operation, with reciprocal read-only CLI review: Codex CLI
+- Host-local `scout` / `worker` / `executor` tiers for both hosts. Codex-hosted
+  scout is a Desktop-controlled read-only Codex CLI Luna tier; its
+  worker/executor remain native Desktop Terra/Sol. Reciprocal review is unchanged: Codex CLI
   reviews Claude-hosted work and Claude CLI reviews Codex-hosted work.
 - Repository-local Codex custom agents, the
   `.agents/skills/orchestration-codex-host` workflow entry, shared 27-field task
-  packets, and a strict schema v2 result envelope.
+  packets, and a strict canonical schema v3 with controller-owned provenance
+  plus provider-owned substantive results.
 - `scripts/init_codex_host.py`, a deterministic target-project materializer for
-  the 21 files required by Codex Desktop, with read-only `--check` mode.
+  the 20 files required by Codex Desktop, with read-only `--check` mode.
 - Fake Codex/Claude transport coverage for authorization preflight, timeout,
   process-group cleanup, partial transcripts, Git evidence, changed-path
   allowlists, structured results, and artifact manifests.
 
 ### Changed
 
-- The active host now performs repository feasibility and implementation using
-  its own native tier. External CLIs are reserved for fresh adversarial review;
+- Codex Desktop now dispatches feasibility through the exact
+  `host_local_cli / codex_cli / codex_read_only / gpt-5.6-luna` tuple while
+  native worker/executor perform implementation. This host-local CLI path is
+  neither a reviewer nor fallback. External reviewers remain reciprocal;
   headless Codex implementation remains a separately authorized, non-default
   opt-in.
 - Kickoff, go, dispatch, and wrapup now preserve authoritative-plan identity,
@@ -42,6 +46,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Governance, execution, Git writes, and provider invocation are independent
   grants. A packet and external-runner command must both carry
   `ALLOW_PROVIDER_INVOCATION` before a CLI process can start.
+- Host-local scout execution instead requires matching
+  `ALLOW_HOST_LOCAL_CLI_INVOCATION` grants; reviewer and scout authorizations
+  cannot authorize one another.
 - Implementers cannot dispatch reviewers; reviewers are fresh and read-only;
   automatic retry, fallback, provider switching, and role chaining remain
   forbidden.
@@ -55,9 +62,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - Real rechecks remain pending for Claude-hosted → Codex CLI review and
   Codex-hosted → Claude CLI review.
-- Real Luna/Terra/Sol native-agent spawning, distinct child-thread/model
-  evidence, scout sandbox precedence, and embedded/standalone Codex runtime
-  parity remain unverified.
+- Real smoke showed that the former native Codex scout TOML did not enforce
+  read-only in the observed embedded runtime; it is no longer a default safety
+  boundary. Corrective real recheck remains pending for Luna CLI scout, native
+  Terra/Sol, schema-v3 reciprocal reviewers, and runtime version skew.
 - Native per-file sandbox enforcement is unavailable. Codex distribution is a
   repository-local materializer, not a native Plugin Directory package.
 - Two defects found by earlier real Codex CLI probes were fixed in C1, but those

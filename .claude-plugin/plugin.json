@@ -1,7 +1,7 @@
 {
   "name": "orchestration",
   "displayName": "Orchestration Workflow",
-  "description": "Governance-neutral dual-host orchestration for Claude Desktop, Claude Code, and Codex Desktop, with host-native scout/worker/executor tiers and separately authorized reciprocal read-only CLI review.",
+  "description": "Governance-neutral dual-host orchestration for Claude and Codex Desktop, with controller-owned provenance, a Codex host-local read-only CLI scout, native implementation tiers, and separately authorized reciprocal CLI review.",
   "version": "0.7.0",
   "author": {
     "name": "letitia-chiu"

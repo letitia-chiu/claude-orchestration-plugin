@@ -54,6 +54,8 @@ FAKE_ENV_KEYS = (
     "FAKE_STDERR_TEXT",
     "FAKE_EXIT_CODE",
     "FAKE_SLEEP_SECONDS",
+    "FAKE_REPORTED_MODEL",
+    "FAKE_SESSION_ID",
 )
 
 GIT_WRITE_SUBCOMMANDS = frozenset(
@@ -89,6 +91,12 @@ EXECUTION_HOSTS = {"claude_hosted": "claude_code", "codex_hosted": "codex_deskto
 PACKET_ALLOW = (
     "fake task packet content\n"
     "External-side-effect authorization: ALLOW_PROVIDER_INVOCATION\n"
+    "Host-local execution authorization: NONE\n"
+)
+PACKET_HOST_LOCAL_ALLOW = (
+    "fake host-local scout packet\n"
+    "External-side-effect authorization: NONE\n"
+    "Host-local execution authorization: ALLOW_HOST_LOCAL_CLI_INVOCATION\n"
 )
 
 # Default invocation path per role for test convenience (each test may override).
@@ -105,6 +113,7 @@ ROLE_DEFAULTS = {
     ("implementer", "claude_hosted"): ("codex_cli", "codex_workspace_write"),
     ("implementer", "codex_hosted"): ("codex_cli", "codex_workspace_write"),
 }
+AUTO_IDENTITY = object()
 
 
 def default_routing():
@@ -119,19 +128,7 @@ def make_result(
     invocation_path=None,
     **overrides,
 ):
-    if invocation_path is None:
-        invocation_path = DEFAULT_INVOCATION[role]
     result = {
-        "schema_version": 2,
-        "governance_identity": dict(GOVERNANCE),
-        "host_mode": host_mode,
-        "execution_host": EXECUTION_HOSTS[host_mode],
-        "host_tier": None,
-        "invocation_path": invocation_path,
-        "role": role,
-        "provider": provider,
-        "profile": profile,
-        "model": "fake-model-1",
         "verdict": (
             "PASS_FOR_IMPLEMENTATION_AUTHORIZATION"
             if role == "feasibility_verifier"
@@ -140,7 +137,6 @@ def make_result(
         "summary": "fake run summary",
         "evidence": ["src/app.py:1 fake evidence"],
         "stop_reason": None,
-        "session_id": "00000000-0000-0000-0000-000000000001",
         "changed_files": [],
         "tests": [],
         "repository_state": {
@@ -217,6 +213,48 @@ class RunnerTestCase(unittest.TestCase):
             GOVERNANCE["final_ratifier"],
         ]
 
+    def repository_identity_argv(self, repo):
+        head = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "-C", str(repo), "status", "--short", "--untracked-files=all"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        return [
+            "--authoritative-plan-sha",
+            "1" * 40,
+            "--candidate-sha",
+            "2" * 40,
+            "--target-repository-head",
+            head,
+            "--target-repository-status",
+            oa._status_evidence(status),
+        ]
+
+    def packet_with_repository_identity(
+        self, packet_text, repo, plan_sha="1" * 40, candidate_sha="2" * 40
+    ):
+        identity = self.repository_identity_argv(repo)
+        values = dict(zip(identity[::2], identity[1::2]))
+        return (
+            packet_text.rstrip("\n")
+            + "\nAuthoritative plan commit SHA: "
+            + plan_sha
+            + "\nRelease/implementation candidate SHA: "
+            + candidate_sha
+            + "\nTarget repository HEAD: "
+            + values["--target-repository-head"]
+            + "\nTarget repository status/dirty-state evidence: "
+            + values["--target-repository-status"]
+            + "\n"
+        )
+
     def run_runner(
         self,
         role,
@@ -237,13 +275,18 @@ class RunnerTestCase(unittest.TestCase):
         model="fake-model-1",
         packet_text=PACKET_ALLOW,
         flag_auth="ALLOW_PROVIDER_INVOCATION",
+        host_local_auth=None,
+        host_tier=None,
+        authoritative_plan_sha="1" * 40,
+        candidate_sha="2" * 40,
+        target_repository_head=AUTO_IDENTITY,
+        target_repository_status=AUTO_IDENTITY,
     ):
         if invocation_path is None:
             invocation_path = DEFAULT_INVOCATION.get(role)
         repo = repo or self.make_repo()
         artifact_dir = self.tmp / ("artifacts-" + uuid.uuid4().hex[:8])
         task_file = self.tmp / ("task-" + uuid.uuid4().hex[:8] + ".md")
-        task_file.write_text(packet_text, encoding="utf-8")
         routing_path = self.write_routing(routing if routing is not None else default_routing())
         os.environ["FAKE_CLI_MODE"] = mode
         if final is None and (role, host_mode) in ROLE_DEFAULTS:
@@ -255,6 +298,35 @@ class RunnerTestCase(unittest.TestCase):
             os.environ["FAKE_FINAL_RESULT"] = json.dumps(final)
         for key, value in (extra_env or {}).items():
             os.environ[key] = value
+        actual_head = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        actual_status = subprocess.run(
+            ["git", "-C", str(repo), "status", "--short", "--untracked-files=all"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        if target_repository_head is AUTO_IDENTITY:
+            target_repository_head = actual_head
+        if target_repository_status is AUTO_IDENTITY:
+            target_repository_status = oa._status_evidence(actual_status)
+        identity_lines = []
+        for field, value in (
+            ("Authoritative plan commit SHA", authoritative_plan_sha),
+            ("Release/implementation candidate SHA", candidate_sha),
+            ("Target repository HEAD", target_repository_head),
+            ("Target repository status/dirty-state evidence", target_repository_status),
+        ):
+            if value is not None:
+                identity_lines.append("%s: %s" % (field, value))
+        task_file.write_text(
+            packet_text.rstrip("\n") + "\n" + "\n".join(identity_lines) + "\n",
+            encoding="utf-8",
+        )
         argv = [
             "run",
             "--routing-file",
@@ -274,14 +346,26 @@ class RunnerTestCase(unittest.TestCase):
             "--model",
             model,
         ]
+        for flag, value in (
+            ("--authoritative-plan-sha", authoritative_plan_sha),
+            ("--candidate-sha", candidate_sha),
+            ("--target-repository-head", target_repository_head),
+            ("--target-repository-status", target_repository_status),
+        ):
+            if value is not None:
+                argv += [flag, value]
         if host_mode is not None:
             argv += ["--host-mode", host_mode]
         if invocation_path is not None:
             argv += ["--invocation-path", invocation_path]
+        if host_tier is not None:
+            argv += ["--host-tier", host_tier]
         if governance:
             argv += self.governance_argv()
         if flag_auth is not None:
             argv += ["--external-authorization", flag_auth]
+        if host_local_auth is not None:
+            argv += ["--host-local-authorization", host_local_auth]
         for path in allowed:
             argv += ["--allowed-file", path]
         for path in forbidden:
@@ -384,7 +468,7 @@ class RoutingValidationTests(RunnerTestCase):
         rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", routing=routing)
         self.assertEqual(rc, 2)
         invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
-        self.assertIn("external CLI provider", invocation["detail"])
+        self.assertIn("only the corrective Codex-hosted scout", invocation["detail"])
 
     def test_role_bindings_tamper_is_configuration_error(self):
         routing = default_routing()
@@ -502,6 +586,7 @@ class DualHostMatrixTests(RunnerTestCase):
         rc, artifacts, _, _ = self.run_runner(
             "implementer",
             invocation_path="active_host",
+            host_tier="worker",
             extra_env={"FAKE_ARGV_FILE": str(argv_file)},
         )
         self.assertEqual(rc, 2)
@@ -540,18 +625,31 @@ class DualHostMatrixTests(RunnerTestCase):
         self.assertEqual(invocation["cli_version"], "fake-claude 0.0.1")
         self.assertEqual(invocation["host_adapter_status"], "implemented")
 
-    def test_codex_hosted_feasibility_requires_native_host(self):
+    def test_codex_hosted_feasibility_uses_authorized_host_local_cli_scout(self):
         argv_file = self.tmp / "captured-argv.json"
         rc, artifacts, _, _ = self.run_runner(
             "feasibility_verifier",
             host_mode="codex_hosted",
+            invocation_path="host_local_cli",
+            host_tier="scout",
+            model="gpt-5.6-luna",
+            packet_text=PACKET_HOST_LOCAL_ALLOW,
+            flag_auth=None,
+            host_local_auth="ALLOW_HOST_LOCAL_CLI_INVOCATION",
             extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+            final=make_result(
+                "feasibility_verifier",
+                "codex_cli",
+                "codex_read_only",
+            ),
         )
-        self.assertEqual(rc, 2)
-        invocation = self.assert_outcome(artifacts, "CAPABILITY_UNAVAILABLE")
-        self.assertIn("host-native execution required", invocation["detail"])
-        self.assertIn("codex_desktop", invocation["detail"])
-        self.assertFalse(argv_file.exists(), "external CLI spawned for feasibility")
+        self.assertEqual(rc, 0)
+        invocation = self.assert_outcome(artifacts, "SUCCESS")
+        self.assertEqual(invocation["provider"], "codex_cli")
+        self.assertEqual(invocation["profile"], "codex_read_only")
+        self.assertEqual(invocation["host_tier"], "scout")
+        self.assertEqual(invocation["invocation_path"], "host_local_cli")
+        self.assertTrue(argv_file.exists())
 
     def test_codex_hosted_implementer_requires_native_host(self):
         argv_file = self.tmp / "captured-argv.json"
@@ -559,6 +657,7 @@ class DualHostMatrixTests(RunnerTestCase):
             "implementer",
             host_mode="codex_hosted",
             invocation_path="active_host",
+            host_tier="executor",
             extra_env={"FAKE_ARGV_FILE": str(argv_file)},
         )
         self.assertEqual(rc, 2)
@@ -718,7 +817,9 @@ class ProviderArgvTests(RunnerTestCase):
         self.assertIn("-C", argv)
         self.assertEqual(argv[argv.index("-C") + 1], str(repo))
         self.assertEqual(argv[-1], "-")
-        self.assertEqual(stdin_capture.read_text(encoding="utf-8"), PACKET_ALLOW)
+        packet_sent = stdin_capture.read_text(encoding="utf-8")
+        self.assertTrue(packet_sent.startswith(PACKET_ALLOW))
+        self.assertIn("Target repository HEAD:", packet_sent)
 
     def test_headless_implementation_argv_requests_network_disabled(self):
         rc, artifacts, _, _ = self.run_runner(
@@ -892,7 +993,10 @@ class ProcessBehaviorTests(RunnerTestCase):
         repo = self.make_repo()
         artifact_dir = self.tmp / "artifacts-interrupt"
         task_file = self.tmp / "task-interrupt.md"
-        task_file.write_text(PACKET_ALLOW, encoding="utf-8")
+        task_file.write_text(
+            self.packet_with_repository_identity(PACKET_ALLOW, repo),
+            encoding="utf-8",
+        )
         routing_path = self.write_routing(default_routing())
         pid_file = self.tmp / "pids-interrupt.json"
         env = os.environ.copy()
@@ -925,6 +1029,7 @@ class ProcessBehaviorTests(RunnerTestCase):
                 "1",
                 "--model",
                 "fake-model-1",
+                *self.repository_identity_argv(repo),
             ],
             env=env,
             stdout=subprocess.DEVNULL,
@@ -954,8 +1059,8 @@ class ProcessBehaviorTests(RunnerTestCase):
         stderr_text = (artifacts / "stderr.log").read_text(encoding="utf-8")
         self.assertIn("stderr-marker-line", stderr_text)
         self.assertNotIn("stderr-marker-line", stdout_text)
-        self.assertIn("fake codex event", stdout_text)
-        self.assertNotIn("fake codex event", stderr_text)
+        self.assertIn("thread.started", stdout_text)
+        self.assertNotIn("thread.started", stderr_text)
 
 
 # ---------------------------------------------------------------------------
@@ -980,7 +1085,10 @@ class StructuredOutputTests(RunnerTestCase):
         rc = None
         repo = self.make_repo()
         task_file = self.tmp / "task-del.md"
-        task_file.write_text(PACKET_ALLOW, encoding="utf-8")
+        task_file.write_text(
+            self.packet_with_repository_identity(PACKET_ALLOW, repo),
+            encoding="utf-8",
+        )
         routing_path = self.write_routing(default_routing())
         os.environ["FAKE_CLI_MODE"] = "delete-transcript"
         os.environ["FAKE_DELETE_PATH"] = str(artifact_dir / "stdout.jsonl")
@@ -1013,21 +1121,22 @@ class StructuredOutputTests(RunnerTestCase):
                     "30",
                     "--model",
                     "fake-model-1",
+                    *self.repository_identity_argv(repo),
                 ]
             )
         self.assertEqual(rc, 1)
         self.assert_outcome(artifact_dir, "TRANSCRIPT_INCOMPLETE")
 
-    def test_result_role_mismatch_is_invalid_output(self):
+    def test_provider_cannot_supply_role_provenance(self):
+        final = make_result("implementer", "codex_cli", "codex_read_only")
+        final["role"] = "implementer"
         rc, artifacts, _, _ = self.run_runner(
             "adversarial_reviewer",
-            final=make_result(
-                "implementer", "codex_cli", "codex_read_only", invocation_path="external_cli"
-            ),
+            final=final,
         )
         self.assertEqual(rc, 1)
         invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
-        self.assertIn("role mismatch", invocation["detail"])
+        self.assertIn("controller-owned", invocation["detail"])
 
     def test_model_blocker_is_distinct_outcome(self):
         rc, artifacts, _, _ = self.run_runner(
@@ -1106,7 +1215,7 @@ class StructuredOutputTests(RunnerTestCase):
         self.assert_outcome(artifacts, "SUCCESS")
         final = json.loads((artifacts / "final-result.json").read_text(encoding="utf-8"))
         for field in ("findings", "observations", "suggestions", "evidence_gaps"):
-            self.assertEqual(final[field], [])
+            self.assertEqual(final["provider_result"][field], [])
 
     def test_feasibility_verdicts_are_enforced_by_validate_result(self):
         # Feasibility runs on the active host and never reaches this runner's
@@ -1119,15 +1228,11 @@ class StructuredOutputTests(RunnerTestCase):
             invocation_path="external_cli",
         )
         self.assertEqual(
-            oa.validate_result(
-                good, "feasibility_verifier", "codex_cli", "codex_read_only", "fake-model-1"
-            ),
+            oa.validate_result(good, "feasibility_verifier"),
             [],
         )
         bad = dict(good, verdict="LOOKS_FINE")
-        errors = oa.validate_result(
-            bad, "feasibility_verifier", "codex_cli", "codex_read_only", "fake-model-1"
-        )
+        errors = oa.validate_result(bad, "feasibility_verifier")
         self.assertTrue(any("feasibility verdict" in e for e in errors))
 
 
@@ -1309,10 +1414,16 @@ class StrictSchemaContractTests(unittest.TestCase):
     def test_runner_preflight_accepts_canonical_schema(self):
         self.assertEqual(oa.preflight_strict_schema(self.SCHEMA), [])
 
-    def test_envelope_distinguishes_dual_host_identity_fields(self):
-        required = set(self.SCHEMA["required"])
+    def test_canonical_schema_separates_provenance_from_provider_result(self):
+        self.assertEqual(set(self.SCHEMA["required"]), {
+            "schema_version", "provenance", "provider_result"
+        })
+        required = set(self.SCHEMA["$defs"]["provenance"]["required"])
         for field in (
             "governance_identity",
+            "authoritative_plan_sha",
+            "candidate_sha",
+            "target_repository_head",
             "host_mode",
             "execution_host",
             "host_tier",
@@ -1320,12 +1431,13 @@ class StrictSchemaContractTests(unittest.TestCase):
             "role",
             "provider",
             "profile",
-            "model",
+            "requested_model",
+            "reported_model",
             "session_id",
         ):
             self.assertIn(field, required, field)
-        self.assertEqual(self.SCHEMA["properties"]["schema_version"]["enum"], [2])
-        gov = self.SCHEMA["$defs"]["governance_identity"]
+        self.assertEqual(self.SCHEMA["properties"]["schema_version"]["enum"], [3])
+        gov = self.SCHEMA["$defs"]["provenance"]["properties"]["governance_identity"]
         self.assertEqual(
             set(gov["required"]),
             {
@@ -1367,13 +1479,15 @@ class SchemaPreflightTests(RunnerTestCase):
         return invocation
 
     def test_missing_nested_additional_properties_fails_closed(self):
-        self.run_with_schema(
-            lambda schema: schema["$defs"]["finding"].pop("additionalProperties")
-        )
+        def mutate(schema):
+            schema["$defs"]["provider_result"]["properties"]["findings"][
+                "items"
+            ].pop("additionalProperties")
+        self.run_with_schema(mutate)
 
     def test_incomplete_required_fails_closed(self):
         def mutate(schema):
-            schema["required"].remove("verdict")
+            schema["$defs"]["provider_result"]["required"].remove("verdict")
 
         self.run_with_schema(mutate)
 
@@ -1386,7 +1500,7 @@ class SchemaPreflightTests(RunnerTestCase):
 
     def test_unresolvable_ref_fails_closed(self):
         def mutate(schema):
-            schema["properties"]["repository_state"] = {
+            schema["properties"]["provider_result"] = {
                 "$ref": "#/$defs/does_not_exist"
             }
 
@@ -1434,17 +1548,17 @@ class FixedEnvelopeTests(RunnerTestCase):
         invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
         self.assertIn("output_digest", invocation["detail"])
 
-    def test_model_mismatch_is_invalid_output(self):
-        final = make_result(
+    def test_reported_model_alias_expansion_is_recorded_not_rejected(self):
+        rc, artifacts, _, _ = self.run_runner(
             "adversarial_reviewer",
-            "codex_cli",
-            "codex_read_only",
-            model="some-other-model",
+            model="sol",
+            extra_env={"FAKE_REPORTED_MODEL": "gpt-5.6-sol"},
         )
-        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", final=final)
-        self.assertEqual(rc, 1)
-        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
-        self.assertIn("model mismatch", invocation["detail"])
+        self.assertEqual(rc, 0)
+        self.assert_outcome(artifacts, "SUCCESS")
+        final = json.loads((artifacts / "final-result.json").read_text())
+        self.assertEqual(final["provenance"]["requested_model"], "sol")
+        self.assertEqual(final["provenance"]["reported_model"], "gpt-5.6-sol")
 
     def test_rewritten_governance_identity_is_invalid_output(self):
         final = make_result("adversarial_reviewer", "codex_cli", "codex_read_only")
@@ -1454,7 +1568,7 @@ class FixedEnvelopeTests(RunnerTestCase):
         rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", final=final)
         self.assertEqual(rc, 1)
         invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
-        self.assertIn("rewritten", invocation["detail"])
+        self.assertIn("controller-owned", invocation["detail"])
 
     def test_host_mode_mismatch_is_invalid_output(self):
         final = make_result(
@@ -1467,7 +1581,7 @@ class FixedEnvelopeTests(RunnerTestCase):
         rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", final=final)
         self.assertEqual(rc, 1)
         invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
-        self.assertIn("host_mode mismatch", invocation["detail"])
+        self.assertIn("controller-owned", invocation["detail"])
 
     def test_external_reviewer_reporting_host_tier_is_invalid_output(self):
         final = make_result(
@@ -1476,7 +1590,7 @@ class FixedEnvelopeTests(RunnerTestCase):
         rc, artifacts, _, _ = self.run_runner("adversarial_reviewer", final=final)
         self.assertEqual(rc, 1)
         invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
-        self.assertIn("host_tier must be null", invocation["detail"])
+        self.assertIn("controller-owned", invocation["detail"])
 
 
 class ArbitraryAuthorityTests(RunnerTestCase):
@@ -1508,11 +1622,13 @@ class ArbitraryAuthorityTests(RunnerTestCase):
         repo = self.make_repo()
         artifact_dir = self.tmp / ("artifacts-" + uuid.uuid4().hex[:8])
         task_file = self.tmp / "task-custom-authority.md"
-        task_file.write_text(PACKET_ALLOW, encoding="utf-8")
+        task_file.write_text(
+            self.packet_with_repository_identity(PACKET_ALLOW, repo),
+            encoding="utf-8",
+        )
         routing_path = self.write_routing(default_routing())
         os.environ["FAKE_CLI_MODE"] = "success"
         final = make_result("adversarial_reviewer", "codex_cli", "codex_read_only")
-        final["governance_identity"] = dict(self.CUSTOM)
         os.environ["FAKE_FINAL_RESULT"] = json.dumps(final)
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -1540,6 +1656,7 @@ class ArbitraryAuthorityTests(RunnerTestCase):
                     "30",
                     "--model",
                     "fake-model-1",
+                    *self.repository_identity_argv(repo),
                 ]
             )
         return rc, artifact_dir
@@ -1550,7 +1667,7 @@ class ArbitraryAuthorityTests(RunnerTestCase):
         invocation = self.assert_outcome(artifacts, "SUCCESS")
         self.assertEqual(invocation["governance_identity"], self.CUSTOM)
 
-    def test_authority_is_echoed_not_derived_from_host_or_provider(self):
+    def test_authority_is_controller_injected_not_derived_from_provider(self):
         rc, artifacts = self.run_with_custom_identity()
         self.assertEqual(rc, 0)
         invocation = self.read_invocation(artifacts)
@@ -1568,6 +1685,9 @@ class ArbitraryAuthorityTests(RunnerTestCase):
         }
         for value in invocation["governance_identity"].values():
             self.assertNotIn(value, derived_candidates, value)
+        final = json.loads((artifacts / "final-result.json").read_text())
+        self.assertEqual(final["provenance"]["governance_identity"], self.CUSTOM)
+        self.assertNotIn("governance_identity", final["provider_result"])
 
     def test_partially_missing_authority_fields_fail_closed(self):
         # Drop exactly one identity field: the runner must name it and stop.
@@ -1575,7 +1695,10 @@ class ArbitraryAuthorityTests(RunnerTestCase):
         repo = self.make_repo()
         artifact_dir = self.tmp / "artifacts-partial-authority"
         task_file = self.tmp / "task-partial-authority.md"
-        task_file.write_text(PACKET_ALLOW, encoding="utf-8")
+        task_file.write_text(
+            self.packet_with_repository_identity(PACKET_ALLOW, repo),
+            encoding="utf-8",
+        )
         routing_path = self.write_routing(default_routing())
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -1603,6 +1726,7 @@ class ArbitraryAuthorityTests(RunnerTestCase):
                     "30",
                     "--model",
                     "fake-model-1",
+                    *self.repository_identity_argv(repo),
                 ]
             )
         self.assertEqual(rc, 2)
@@ -1757,6 +1881,157 @@ class ExternalAuthorizationTests(RunnerTestCase):
         )
         self.assertEqual(errors, [])
         self.assertEqual(value, "ALLOW_PROVIDER_INVOCATION")
+
+
+class CorrectiveC2ContractTests(RunnerTestCase):
+    """C2: host-local scout, immutable provenance, and repository identities."""
+
+    def scout_kwargs(self):
+        return {
+            "host_mode": "codex_hosted",
+            "invocation_path": "host_local_cli",
+            "host_tier": "scout",
+            "model": "gpt-5.6-luna",
+            "packet_text": PACKET_HOST_LOCAL_ALLOW,
+            "flag_auth": None,
+            "host_local_auth": "ALLOW_HOST_LOCAL_CLI_INVOCATION",
+            "final": make_result(
+                "feasibility_verifier", "codex_cli", "codex_read_only"
+            ),
+        }
+
+    def test_external_reviewer_token_cannot_authorize_host_local_scout(self):
+        kwargs = self.scout_kwargs()
+        kwargs.update(packet_text=PACKET_ALLOW, flag_auth="ALLOW_PROVIDER_INVOCATION")
+        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", **kwargs)
+        self.assertEqual(rc, 2)
+        self.assertIn("cannot authorize host_local_cli", self.assert_outcome(
+            artifacts, "CONFIGURATION_ERROR"
+        )["detail"])
+
+    def test_host_local_token_cannot_authorize_external_reviewer(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            packet_text=PACKET_HOST_LOCAL_ALLOW,
+            flag_auth=None,
+            host_local_auth="ALLOW_HOST_LOCAL_CLI_INVOCATION",
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("cannot authorize external_cli", self.assert_outcome(
+            artifacts, "CONFIGURATION_ERROR"
+        )["detail"])
+
+    def test_host_local_scout_write_profile_is_rejected_before_spawn(self):
+        data = default_routing()
+        data["host_modes"]["codex_hosted"]["local_tiers"]["scout"]["profile"] = (
+            "codex_workspace_write"
+        )
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier", routing=data, **self.scout_kwargs()
+        )
+        self.assertEqual(rc, 2)
+        self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+
+    def test_host_local_scout_model_substitution_is_rejected(self):
+        kwargs = self.scout_kwargs()
+        kwargs["model"] = "gpt-5.6-sol"
+        rc, artifacts, _, _ = self.run_runner("feasibility_verifier", **kwargs)
+        self.assertEqual(rc, 2)
+        self.assertIn("gpt-5.6-luna", self.assert_outcome(
+            artifacts, "CONFIGURATION_ERROR"
+        )["detail"])
+
+    def test_missing_target_repository_head_fails_closed(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer", target_repository_head=None
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("target repository HEAD", self.assert_outcome(
+            artifacts, "CONFIGURATION_ERROR"
+        )["detail"])
+
+    def test_missing_target_dirty_state_evidence_fails_closed(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer", target_repository_status=None
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("dirty-state evidence", self.assert_outcome(
+            artifacts, "CONFIGURATION_ERROR"
+        )["detail"])
+
+    def test_target_repository_head_mismatch_fails_before_spawn(self):
+        argv_file = self.tmp / "not-spawned.json"
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            target_repository_head="3" * 40,
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("HEAD mismatch", self.assert_outcome(
+            artifacts, "CONFIGURATION_ERROR"
+        )["detail"])
+        self.assertFalse(argv_file.exists())
+
+    def test_plan_candidate_and_target_head_may_all_differ(self):
+        rc, artifacts, repo, _ = self.run_runner(
+            "adversarial_reviewer",
+            authoritative_plan_sha="a" * 40,
+            candidate_sha="b" * 40,
+        )
+        self.assertEqual(rc, 0)
+        final = json.loads((artifacts / "final-result.json").read_text())
+        provenance = final["provenance"]
+        self.assertEqual(provenance["authoritative_plan_sha"], "a" * 40)
+        self.assertEqual(provenance["candidate_sha"], "b" * 40)
+        self.assertEqual(
+            provenance["target_repository_head"],
+            subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip(),
+        )
+
+    def test_provider_transport_schema_contains_only_substantive_fields(self):
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer")
+        self.assertEqual(rc, 0)
+        schema = json.loads((artifacts / "provider-result.schema.json").read_text())
+        self.assertEqual(set(schema["required"]), set(oa.PROVIDER_RESULT_REQUIRED))
+        for field in ("governance_identity", "host_mode", "model", "session_id"):
+            self.assertNotIn(field, schema["properties"])
+
+    def test_final_result_has_controller_provenance_and_provider_result(self):
+        rc, artifacts, _, _ = self.run_runner("adversarial_reviewer")
+        self.assertEqual(rc, 0)
+        final = json.loads((artifacts / "final-result.json").read_text())
+        self.assertEqual(set(final), {"schema_version", "provenance", "provider_result"})
+        self.assertEqual(final["schema_version"], 3)
+        self.assertEqual(final["provenance"]["governance_identity"], GOVERNANCE)
+
+    def test_provider_provenance_attempt_never_creates_canonical_artifact(self):
+        result = make_result("adversarial_reviewer", "codex_cli", "codex_read_only")
+        result["provenance"] = {"final_ratifier": "provider"}
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer", final=result
+        )
+        self.assertEqual(rc, 1)
+        self.assert_outcome(artifacts, "INVALID_OUTPUT")
+        self.assertFalse((artifacts / "final-result.json").exists())
+
+    def test_claude_substantive_result_accepts_reported_alias_expansion(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer",
+            host_mode="codex_hosted",
+            model="sonnet",
+            extra_env={"FAKE_REPORTED_MODEL": "claude-sonnet-4-6"},
+        )
+        self.assertEqual(rc, 0)
+        final = json.loads((artifacts / "final-result.json").read_text())
+        self.assertEqual(final["provenance"]["requested_model"], "sonnet")
+        self.assertEqual(
+            final["provenance"]["reported_model"], "claude-sonnet-4-6"
+        )
 
 
 class ClaudeInvocationContractTests(RunnerTestCase):

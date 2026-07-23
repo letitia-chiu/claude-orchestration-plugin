@@ -36,7 +36,6 @@ CONFLICT = "CONFLICT"
 
 INVENTORY = (
     "AGENTS.md",
-    ".codex/agents/scout.toml",
     ".codex/agents/worker.toml",
     ".codex/agents/executor.toml",
     ".agents/skills/orchestration-codex-host/SKILL.md",

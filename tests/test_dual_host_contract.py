@@ -243,13 +243,9 @@ class CommandContractTests(unittest.TestCase):
 
     def test_dispatch_routes_implementation_to_active_host(self):
         text = self.read("dispatch.md")
-        self.assertIn("active_host_local_tier", text)
-        self.assertIn(
-            "The external CLI is never the default implementer, and the host's own "
-            "CLI is never its own reviewer.",
-            text,
-        )
-        self.assertIn("Codex-host adapter is not implemented", text)
+        self.assertIn("native worker/executor", text)
+        self.assertIn("host_local_cli", text)
+        self.assertIn("gpt-5.6-luna", text)
         self.assertIn("--invocation-path", text)
         self.assertIn("--governance-authority", text)
 
@@ -274,9 +270,9 @@ class CommandContractTests(unittest.TestCase):
 
     def test_go_requires_explicit_host_mode_and_tier_authorization(self):
         text = self.read("go.md")
-        self.assertIn("host mode (`claude_hosted` or `codex_hosted`", text)
-        self.assertIn("host-local tier authorization", text)
-        self.assertIn("fails closed", text)
+        self.assertIn("Codex-hosted feasibility", text)
+        self.assertIn("ALLOW_HOST_LOCAL_CLI_INVOCATION", text)
+        self.assertIn("target repository HEAD", text)
         self.assertIn("independent reviewer authorization", text)
 
     def test_wrapup_separates_active_host_and_external_review_evidence(self):

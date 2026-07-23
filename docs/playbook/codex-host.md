@@ -1,16 +1,16 @@
 # Codex-host adapter
 
 This is the formal contract for `host_mode = codex_hosted`. Codex Desktop is the
-active execution host. Its host-local tiers are Codex-native agents; Claude CLI
-is available only as a fresh, separately authorized read-only adversarial
-reviewer.
+active execution host. Scout is a Desktop-controlled host-local read-only Codex
+CLI tier; worker/executor are native Desktop agents. Claude CLI is available
+only as a fresh, separately authorized read-only adversarial reviewer.
 
 The adapter does not assign governance:
 
 ```text
 governance authority
 != Codex Desktop active host
-!= Codex-native scout / worker / executor
+!= Codex host-local scout / native worker / native executor
 != Claude CLI external reviewer
 ```
 
@@ -24,10 +24,11 @@ reviewer opinion do not grant authority.
 
 - Root binding: `AGENTS.md`
 - Workflow entry: `.agents/skills/orchestration-codex-host/SKILL.md`
-- Native agents:
-  - `.codex/agents/scout.toml`
+- Native implementation agents:
   - `.codex/agents/worker.toml`
   - `.codex/agents/executor.toml`
+- Host-local scout: `scripts/orchestration_agent.py` resolving
+  `host_local_cli / codex_cli / codex_read_only / gpt-5.6-luna`
 - Shared routing: `docs/playbook/agent-routing.json`
 - Gate packet: `examples/task-packets/codex-host-gate.md`
 - External transport: `scripts/orchestration_agent.py`
@@ -41,7 +42,7 @@ invocation.
 ## Target-project installation
 
 The adapter files in the plugin checkout are not automatically installed in
-another repository. From the plugin root, materialize the fixed 21-file
+another repository. From the plugin root, materialize the fixed 20-file
 inventory into an explicit target Git root:
 
 ```bash
@@ -65,7 +66,7 @@ Codex Plugin Directory package.
 
 | Risk / task shape | Tier | Default model | Reasoning | Sandbox | Ownership |
 |---|---|---|---|---|---|
-| inventory, location, narrow feasibility | scout | `gpt-5.6-luna` | low | read-only | evidence only; no implementation |
+| inventory, location, narrow feasibility | scout | `gpt-5.6-luna` | CLI profile | runner-enforced read-only plus Git mutation evidence | evidence only; no implementation |
 | specified implementation with one invariant or defect family | worker | `gpt-5.6-terra` | medium | workspace-write | bounded implementation and authorized tests |
 | cross-module, contractual, security, persistence, or otherwise high-risk work | executor | `gpt-5.6-sol` | high | workspace-write | complete authorized invariant and defect-class closure |
 
@@ -75,24 +76,28 @@ no automatic fallback, retry, model switching, or role chaining. A higher tier
 never receives extra file, Git, governance, acceptance, adjudication, or
 ratification authority.
 
-Codex Desktop should create a distinct child thread/task for the selected native
-agent and record its UUID and actual model. The PATH Codex CLI is not the active
-host and must not be used to emulate one.
+Codex Desktop explicitly dispatches scout through the target-local runner with
+independent `ALLOW_HOST_LOCAL_CLI_INVOCATION` authorization. The CLI is the
+local tier execution mechanism; the PATH Codex CLI is not the active host, a
+reviewer, or a fallback.
+Worker/executor use distinct native Desktop child tasks.
 
-`sandbox_mode` establishes the agent-level filesystem mode. Allowed and
-forbidden file lists remain packet contracts verified by instructions, tests,
-and pre/post Git evidence; native per-file sandbox enforcement is not available.
+Real smoke showed that `.codex/agents/scout.toml` with
+`sandbox_mode = read-only` did not enforce a read-only boundary in the observed
+embedded runtime; the file and misleading default were retired.
+Native per-file sandbox enforcement remains unavailable.
 
 ## Gate flow
 
 1. `kickoff` reads the exact authoritative plan identity, collects the five
    governance identities plus host/tier/model/worktree identities, and
-   materializes the common 27-field packet. It stops as unauthorized.
-2. `go` validates exact worktree, branch, HEAD, plan/base identities, current
+   materializes the C2 packet. It stops as unauthorized.
+2. `go` separately validates authoritative plan SHA, release/implementation
+   candidate SHA, target repository HEAD, target dirty-state evidence, current
    authorization, tier/model, allowed and forbidden files, tests, and stop
    conditions. Execution authorization and Git authorization remain separate.
-3. `dispatch` sends feasibility/implementation only to the selected
-   Codex-native tier. Active-host work never starts the external runner.
+3. `dispatch` sends feasibility to the exact host-local CLI scout tuple and
+   implementation to native worker/executor.
 4. `wrapup` records active-host evidence independently and defaults every next
    authorization to NO.
 
@@ -120,6 +125,12 @@ External-side-effect authorization = ALLOW_PROVIDER_INVOCATION
 --external-authorization ALLOW_PROVIDER_INVOCATION
 ```
 
+The controller has already supplied immutable provenance. The reviewer produces
+only the substantive `provider_result`; it does not infer, modify, confirm, or
+adjudicate authority metadata. The runner mechanically extracts the provider
+schema from the canonical schema-v3 SSOT, records requested/reported model
+separately, and writes `provenance + provider_result`.
+
 The runner starts at most one fresh Claude CLI process. The reviewer cannot
 modify the repository, repair findings, dispatch a host or another role, or
 claim governance, acceptance, adjudication, or ratification authority. It
@@ -132,16 +143,16 @@ Desktop implementation report has no external runner manifest; record
 
 ## Pending real evidence
 
-Static adapter implementation is not runtime smoke evidence. The following
-remain pending a later, independently authorized smoke batch:
+The failed smoke established the native scout sandbox defect. After this
+corrective contract, the following real rechecks remain pending:
 
-- real Luna, Terra, and Sol native agent spawning;
-- three distinct child thread UUIDs and actual model identities;
-- scout read-only sandbox precedence;
+- real Luna CLI scout;
+- real Terra worker and Sol executor native tasks;
+- schema-v3 Claude and Codex reviewers;
 - embedded Codex Desktop and standalone CLI runtime parity;
-- a real fresh Claude CLI read-only reviewer result;
-- runtime proof for allowed/forbidden-file behavior beyond the available
-  agent-level sandbox.
+- requested/reported model and session metadata across version skew.
+
+Treat this as pending runtime version-skew behavior evidence, not binary parity.
 
 Do not claim these capabilities have passed until the later smoke artifacts
 exist.

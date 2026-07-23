@@ -8,9 +8,9 @@ This runner is a narrow process-safety wrapper. Per invocation it:
   the task packet, never from the routing file);
 - requires an explicit governance identity, host mode, and invocation path
   (fail closed on any missing identity field);
-- resolves the role through the dual-host contract: feasibility_verifier and
-  implementer belong to the active host's local tiers (this runner refuses to
-  emulate the active host); adversarial_reviewer resolves to the opposing
+- resolves the role through the dual-host contract: Codex-hosted scout is a
+  Desktop-dispatched host-local read-only Codex CLI tier; worker/executor remain
+  native active-host tiers; adversarial_reviewer resolves to the opposing
   provider's read-only CLI; headless_cli implementation is a non-default,
   separately authorized opt-in;
 - mechanically enforces the task packet's External-side-effect authorization
@@ -24,7 +24,9 @@ This runner is a narrow process-safety wrapper. Per invocation it:
 - records pre/post Git evidence with read-only Git commands only;
 - detects repository mutation for read-only roles;
 - validates implementation changed paths against allow/forbid lists;
-- validates the final structured result against the Batch 1 envelope;
+- sends only the provider_result subschema to the provider, validates the
+  substantive result, and combines it with controller-owned immutable
+  provenance in the canonical schema-v3 final artifact;
 - writes an artifact bundle plus a SHA-256 manifest;
 - returns a machine-readable classified outcome.
 
@@ -74,7 +76,7 @@ READ_ONLY_ROLES = frozenset({"feasibility_verifier", "adversarial_reviewer"})
 EXTERNAL_PROVIDERS = frozenset({"codex_cli", "claude_cli"})
 
 HOST_MODES = ("claude_hosted", "codex_hosted")
-INVOCATION_PATHS = ("active_host", "external_cli", "headless_cli")
+INVOCATION_PATHS = ("active_host", "host_local_cli", "external_cli", "headless_cli")
 HOST_TIERS = ("scout", "worker", "executor")
 GOVERNANCE_IDENTITY_FIELDS = (
     "governance_authority",
@@ -109,6 +111,8 @@ CONSTRAINTS_REQUIRED = {
 # the packet value and the caller flag must both equal this token.
 EXTERNAL_AUTH_FIELD = "External-side-effect authorization"
 ALLOW_PROVIDER_INVOCATION = "ALLOW_PROVIDER_INVOCATION"
+HOST_LOCAL_AUTH_FIELD = "Host-local execution authorization"
+ALLOW_HOST_LOCAL_CLI_INVOCATION = "ALLOW_HOST_LOCAL_CLI_INVOCATION"
 
 # External CLI profile -> (provider kind, write-capable)
 PROFILES = {
@@ -120,22 +124,11 @@ PROFILES = {
 # The only Git subcommands this runner may ever execute (evidence collection).
 GIT_READ_ONLY_SUBCOMMANDS = frozenset({"rev-parse", "status", "diff", "ls-files", "version"})
 
-ENVELOPE_REQUIRED = (
-    "schema_version",
-    "governance_identity",
-    "host_mode",
-    "execution_host",
-    "host_tier",
-    "invocation_path",
-    "role",
-    "provider",
-    "profile",
-    "model",
+PROVIDER_RESULT_REQUIRED = (
     "verdict",
     "summary",
     "evidence",
     "stop_reason",
-    "session_id",
     "changed_files",
     "tests",
     "repository_state",
@@ -238,10 +231,14 @@ def _snapshot_git(workdir):
         workdir, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]
     )
     entries = _parse_porcelain_z(status_raw)
+    status_short = _git_text(
+        workdir, ["status", "--short", "--untracked-files=all"]
+    ).decode(errors="replace")
     tracked_diff = _git_text(workdir, ["diff", "--binary"])
     cached_diff = _git_text(workdir, ["diff", "--cached", "--binary"])
     return {
         "head": head,
+        "status_short": status_short,
         "status_entries": entries,
         "tracked_diff_sha256": hashlib.sha256(tracked_diff).hexdigest(),
         "cached_diff_sha256": hashlib.sha256(cached_diff).hexdigest(),
@@ -407,10 +404,15 @@ def validate_routing(routing):
                     "host mode %s tier %s: provider must be a non-empty string"
                     % (mode_name, tier_name)
                 )
-            elif tier_provider in EXTERNAL_PROVIDERS:
+            elif tier_provider in EXTERNAL_PROVIDERS and not (
+                mode_name == "codex_hosted"
+                and tier_name == "scout"
+                and tier_provider == "codex_cli"
+            ):
                 errors.append(
-                    "host mode %s tier %s: a host-local tier must never map to an "
-                    "external CLI provider (%s)" % (mode_name, tier_name, tier_provider)
+                    "host mode %s tier %s: only the corrective Codex-hosted scout "
+                    "may use a host-local CLI provider; got %s"
+                    % (mode_name, tier_name, tier_provider)
                 )
             if not isinstance(tier.get("profile"), str) or not tier.get("profile"):
                 errors.append(
@@ -423,6 +425,31 @@ def validate_routing(routing):
                     "host mode %s tier %s: model_override must be a non-empty string or null"
                     % (mode_name, tier_name)
                 )
+        if mode_name == "codex_hosted" and tiers:
+            scout = tiers.get("scout", {})
+            expected_scout = {
+                "provider": "codex_cli",
+                "profile": "codex_read_only",
+                "invocation_path": "host_local_cli",
+                "model_override": "gpt-5.6-luna",
+            }
+            if scout != expected_scout:
+                errors.append(
+                    "host mode codex_hosted tier scout must be exactly %r"
+                    % expected_scout
+                )
+            for tier_name in ("worker", "executor"):
+                tier = tiers.get(tier_name, {})
+                if tier.get("provider") != "codex_native":
+                    errors.append(
+                        "host mode codex_hosted tier %s must remain codex_native"
+                        % tier_name
+                    )
+                if tier.get("invocation_path") != "active_host":
+                    errors.append(
+                        "host mode codex_hosted tier %s invocation_path must be active_host"
+                        % tier_name
+                    )
         reviewer = mode.get("external_reviewer")
         if not isinstance(reviewer, dict):
             errors.append("host mode %s: external_reviewer must be an object" % mode_name)
@@ -496,8 +523,8 @@ def validate_routing(routing):
     return errors
 
 
-def parse_packet_external_authorization(packet_text):
-    """Mechanically extract the External-side-effect authorization value.
+def _parse_packet_authorization(packet_text, field_name):
+    """Mechanically extract one exact authorization field value.
 
     Scans every packet line containing the field name and takes the first
     value token after it (table cell or colon form). Returns (value, errors):
@@ -507,9 +534,9 @@ def parse_packet_external_authorization(packet_text):
     """
     tokens = []
     for line in packet_text.splitlines():
-        if EXTERNAL_AUTH_FIELD not in line:
+        if field_name not in line:
             continue
-        remainder = line.split(EXTERNAL_AUTH_FIELD, 1)[1]
+        remainder = line.split(field_name, 1)[1]
         remainder = remainder.strip().lstrip(":").lstrip("|").strip()
         if remainder.endswith("|"):
             remainder = remainder[:-1].strip()
@@ -522,15 +549,51 @@ def parse_packet_external_authorization(packet_text):
         tokens.append(re.split(r"[\s（(]", remainder, maxsplit=1)[0])
     unique = sorted(set(tokens))
     if not unique:
-        return None, ["task packet does not carry the %r field" % EXTERNAL_AUTH_FIELD]
+        return None, ["task packet does not carry the %r field" % field_name]
     if len(unique) > 1:
         return None, [
             "task packet %r is ambiguous: conflicting values %s"
-            % (EXTERNAL_AUTH_FIELD, unique)
+            % (field_name, unique)
         ]
     if unique[0] == "":
-        return None, ["task packet %r carries no value" % EXTERNAL_AUTH_FIELD]
+        return None, ["task packet %r carries no value" % field_name]
     return unique[0], []
+
+
+def parse_packet_external_authorization(packet_text):
+    return _parse_packet_authorization(packet_text, EXTERNAL_AUTH_FIELD)
+
+
+def parse_packet_host_local_authorization(packet_text):
+    return _parse_packet_authorization(packet_text, HOST_LOCAL_AUTH_FIELD)
+
+
+def _parse_packet_identity(packet_text, field_names):
+    """Return one unambiguous same-line packet identity value."""
+    values = []
+    for line in packet_text.splitlines():
+        for field_name in field_names:
+            if field_name not in line:
+                continue
+            remainder = line.split(field_name, 1)[1]
+            remainder = remainder.strip().lstrip(":").lstrip("|").strip()
+            if remainder.endswith("|"):
+                remainder = remainder[:-1].strip()
+            remainder = remainder.strip("`")
+            if remainder:
+                values.append(remainder)
+            break
+    unique = sorted(set(values))
+    if len(unique) != 1:
+        return None, "packet field %s must have one unambiguous value" % field_names[0]
+    return unique[0], None
+
+
+def _status_evidence(status_short):
+    """Compact exact evidence token suitable for a one-line packet field."""
+    if status_short == "":
+        return "CLEAN"
+    return "sha256:" + hashlib.sha256(status_short.encode("utf-8")).hexdigest()
 
 
 def resolve_host_mode(routing, host_mode):
@@ -564,7 +627,22 @@ def resolve_tier_model(routing, host_mode, tier):
 # ---------------------------------------------------------------------------
 
 
-def build_provider_command(provider, profile, model, workdir, artifact_dir):
+def extract_provider_result_schema(canonical_schema):
+    """Mechanically extract the sole provider transport schema from the SSOT."""
+    try:
+        provider_schema = canonical_schema["$defs"]["provider_result"]
+    except (KeyError, TypeError) as exc:
+        raise ConfigError(
+            "canonical schema does not define $defs.provider_result"
+        ) from exc
+    if not isinstance(provider_schema, dict):
+        raise ConfigError("$defs.provider_result must be an object schema")
+    return provider_schema
+
+
+def build_provider_command(
+    provider, profile, model, workdir, artifact_dir, provider_schema_file
+):
     """Return (argv, provider_metadata) for the single external process."""
     if provider == "codex_cli":
         sandbox = "workspace-write" if profile == "codex_workspace_write" else "read-only"
@@ -592,11 +670,11 @@ def build_provider_command(provider, profile, model, workdir, artifact_dir):
         argv += [
             "--json",
             "--output-schema",
-            str(RESULT_SCHEMA_FILE),
+            str(provider_schema_file),
             "-m",
             model,
             "--output-last-message",
-            str(artifact_dir / "final-result.json"),
+            str(artifact_dir / "provider-result.json"),
             "-",
         ]
         metadata = {
@@ -606,7 +684,7 @@ def build_provider_command(provider, profile, model, workdir, artifact_dir):
         }
         return argv, metadata
     if provider == "claude_cli":
-        schema_text = RESULT_SCHEMA_FILE.read_text(encoding="utf-8")
+        schema_text = provider_schema_file.read_text(encoding="utf-8")
         argv = [
             "claude",
             "-p",
@@ -709,7 +787,7 @@ def _terminate_process_group(proc, grace_seconds):
 
 
 def _extract_codex_result(artifact_dir):
-    final_path = artifact_dir / "final-result.json"
+    final_path = artifact_dir / "provider-result.json"
     if not final_path.is_file():
         return None, "final structured result file was not produced"
     try:
@@ -719,6 +797,41 @@ def _extract_codex_result(artifact_dir):
     if not isinstance(parsed, dict):
         return None, "final result is not a JSON object"
     return parsed, None
+
+
+def _extract_provider_metadata(stdout_path):
+    """Read provider-owned event metadata without trusting substantive output.
+
+    Model aliases may expand. The runner records requested_model separately
+    and preserves any CLI-reported model as evidence; inequality is not an
+    output-validation failure. Session/thread IDs are likewise event evidence.
+    """
+    reported_model = None
+    session_id = None
+
+    def visit(value):
+        nonlocal reported_model, session_id
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "model" and isinstance(item, str) and item:
+                    reported_model = item
+                elif key in ("session_id", "thread_id") and isinstance(item, str) and item:
+                    session_id = item
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    try:
+        with open(stdout_path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    visit(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return {"reported_model": reported_model, "session_id": session_id}
 
 
 def _extract_claude_result(stdout_path):
@@ -753,72 +866,30 @@ def _extract_claude_result(stdout_path):
     return None, "result event carries no structured output object"
 
 
-def validate_result(result, role, provider, profile, model, identity=None):
-    """Standard-library validation of the fixed result envelope (schema v2).
+def validate_result(result, role):
+    """Validate provider-owned substantive content only.
 
-    The transport schema is the strict-subset canonical schema; the
-    role-specific semantics removed from the schema are enforced here.
-    `identity` (when supplied) is the invocation-side identity dict with
-    host_mode / execution_host / invocation_path / governance_identity; a
-    provider may never rewrite these fields.
+    The strict provider transport schema rejects extra provenance-like fields;
+    this local validation repeats the exact-field and role-specific checks so
+    fake transports and post-processing fail closed in the same way. The
+    provider is never asked to echo authority, host, invocation, model, or
+    session metadata.
     """
     errors = []
     if not isinstance(result, dict):
-        return ["final result is not a JSON object"]
-    for field in ENVELOPE_REQUIRED:
+        return ["provider result is not a JSON object"]
+    for field in PROVIDER_RESULT_REQUIRED:
         if field not in result:
             errors.append("missing required field: %s" % field)
+    extra = sorted(set(result) - set(PROVIDER_RESULT_REQUIRED))
+    if extra:
+        errors.append(
+            "provider result contains controller-owned or unknown fields: %s"
+            % ", ".join(extra)
+        )
     if errors:
         return errors
-    if result["schema_version"] != 2:
-        errors.append("schema_version must be 2")
-    for field, expected in (
-        ("role", role),
-        ("provider", provider),
-        ("profile", profile),
-        ("model", model),
-    ):
-        if result[field] != expected:
-            errors.append(
-                "%s mismatch: invocation=%s result=%r" % (field, expected, result[field])
-            )
-    gov = result["governance_identity"]
-    if not isinstance(gov, dict) or set(gov) != set(GOVERNANCE_IDENTITY_FIELDS):
-        errors.append(
-            "governance_identity must be an object with exactly the fields %s"
-            % (sorted(GOVERNANCE_IDENTITY_FIELDS),)
-        )
-    else:
-        for field in GOVERNANCE_IDENTITY_FIELDS:
-            if not isinstance(gov[field], str) or not gov[field]:
-                errors.append("governance_identity.%s must be a non-empty string" % field)
-    if result["host_mode"] not in HOST_MODES:
-        errors.append("host_mode must be one of %s" % sorted(HOST_MODES))
-    if not isinstance(result["execution_host"], str) or not result["execution_host"]:
-        errors.append("execution_host must be a non-empty string")
-    if result["invocation_path"] not in INVOCATION_PATHS:
-        errors.append("invocation_path must be one of %s" % sorted(INVOCATION_PATHS))
-    if result["invocation_path"] in ("external_cli", "headless_cli"):
-        if result["host_tier"] is not None:
-            errors.append(
-                "host_tier must be null for %s invocations (an external invocation "
-                "never reports host-local tier execution)" % result["invocation_path"]
-            )
-    elif result["host_tier"] is not None and result["host_tier"] not in HOST_TIERS:
-        errors.append("host_tier must be null or one of %s" % sorted(HOST_TIERS))
-    if identity is not None:
-        for field in ("host_mode", "execution_host", "invocation_path"):
-            if result[field] != identity[field]:
-                errors.append(
-                    "%s mismatch: invocation=%s result=%r"
-                    % (field, identity[field], result[field])
-                )
-        if isinstance(gov, dict) and gov != identity["governance_identity"]:
-            errors.append(
-                "governance_identity was rewritten by the provider; it must echo "
-                "the task packet identity verbatim"
-            )
-    for field in ("model", "verdict", "summary"):
+    for field in ("verdict", "summary"):
         if not isinstance(result[field], str) or not result[field]:
             errors.append("%s must be a non-empty string" % field)
     if not isinstance(result["evidence"], list) or any(
@@ -827,8 +898,6 @@ def validate_result(result, role, provider, profile, model, identity=None):
         errors.append("evidence must be a list of strings")
     if result["stop_reason"] is not None and not isinstance(result["stop_reason"], str):
         errors.append("stop_reason must be a string or null")
-    if result["session_id"] is not None and not isinstance(result["session_id"], str):
-        errors.append("session_id must be a string or null")
     if not isinstance(result["changed_files"], list) or any(
         not isinstance(item, str) for item in result["changed_files"]
     ):
@@ -849,10 +918,27 @@ def validate_result(result, role, provider, profile, model, identity=None):
             ):
                 errors.append("tests[%d].output_digest must be a string or null" % index)
     state = result["repository_state"]
-    if not isinstance(state, dict) or not isinstance(state.get("pre"), dict) or not isinstance(
-        state.get("post"), dict
+    if (
+        not isinstance(state, dict)
+        or set(state) != {"pre", "post"}
+        or not isinstance(state.get("pre"), dict)
+        or not isinstance(state.get("post"), dict)
     ):
         errors.append("repository_state must contain pre and post objects")
+    else:
+        for point in ("pre", "post"):
+            git_state = state[point]
+            if set(git_state) != {"head_sha", "status_short"}:
+                errors.append(
+                    "repository_state.%s must contain exactly head_sha/status_short"
+                    % point
+                )
+            elif not isinstance(git_state["head_sha"], str) or not isinstance(
+                git_state["status_short"], str
+            ):
+                errors.append(
+                    "repository_state.%s head_sha/status_short must be strings" % point
+                )
     if role == "feasibility_verifier" and result["verdict"] not in FEASIBILITY_VERDICTS:
         errors.append("feasibility verdict must be one of %s" % sorted(FEASIBILITY_VERDICTS))
     if role in READ_ONLY_ROLES and result["changed_files"]:
@@ -1010,15 +1096,21 @@ def cmd_run(args):
         "invocation_path": args.invocation_path,
         "governance_identity": governance_identity,
         "external_side_effect_authorization": None,
+        "host_local_execution_authorization": None,
         "execution_host": None,
+        "host_tier": args.host_tier,
         "host_adapter_status": None,
         "provider": None,
         "profile": None,
-        "model": args.model,
+        "requested_model": args.model,
+        "reported_model": None,
         "executable": None,
         "cli_version": None,
         "workdir": str(args.workdir),
         "authoritative_plan_sha": args.authoritative_plan_sha,
+        "candidate_sha": args.candidate_sha,
+        "target_repository_head": args.target_repository_head,
+        "target_repository_status": args.target_repository_status,
         "base_sha": args.base_sha,
         "target_sha": args.target_sha,
         "sandbox": None,
@@ -1061,6 +1153,7 @@ def cmd_run(args):
         task_file = Path(args.task_file)
         if not task_file.is_absolute() or not task_file.is_file():
             raise ConfigError("task-file must be an existing absolute file path")
+        packet_text = task_file.read_text(encoding="utf-8", errors="replace")
         if not artifact_dir.is_absolute():
             raise ConfigError("artifact-dir must be an absolute path")
         try:
@@ -1085,6 +1178,15 @@ def cmd_run(args):
             raise ConfigError(
                 "schema strict-subset preflight failed: " + "; ".join(schema_errors)
             )
+        provider_schema = extract_provider_result_schema(schema_doc)
+        provider_schema_errors = preflight_strict_schema(provider_schema)
+        if provider_schema_errors:
+            raise ConfigError(
+                "provider_result schema strict-subset preflight failed: "
+                + "; ".join(provider_schema_errors)
+            )
+        provider_schema_file = artifact_dir / "provider-result.schema.json"
+        _write_json(provider_schema_file, provider_schema)
 
         # Governance identity is packet-supplied and mandatory (fail closed).
         missing_identity = sorted(
@@ -1098,6 +1200,51 @@ def cmd_run(args):
                 "packet must state every governance identity field explicitly"
                 % ", ".join(missing_identity)
             )
+        identity_values = {
+            "authoritative plan SHA": args.authoritative_plan_sha,
+            "candidate SHA": args.candidate_sha,
+            "target repository HEAD": args.target_repository_head,
+        }
+        for label, value in identity_values.items():
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", value):
+                raise ConfigError("%s must be an explicit 40-hex identity" % label)
+        if args.target_repository_status is None:
+            raise ConfigError(
+                "target repository status/dirty-state evidence must be explicit"
+            )
+        packet_identity_contract = (
+            (
+                ("Authoritative plan commit SHA", "Authoritative plan SHA"),
+                args.authoritative_plan_sha,
+            ),
+            (
+                (
+                    "Release/implementation candidate SHA",
+                    "Release／implementation candidate SHA",
+                    "Candidate SHA",
+                ),
+                args.candidate_sha,
+            ),
+            (("Target repository HEAD",), args.target_repository_head),
+            (
+                (
+                    "Target repository status/dirty-state evidence",
+                    "Target repository status／dirty-state evidence",
+                ),
+                args.target_repository_status,
+            ),
+        )
+        for field_names, expected in packet_identity_contract:
+            packet_value, packet_error = _parse_packet_identity(
+                packet_text, field_names
+            )
+            if packet_error:
+                raise ConfigError(packet_error)
+            if packet_value != expected:
+                raise ConfigError(
+                    "packet/invocation identity mismatch for %s: packet=%r "
+                    "invocation=%r" % (field_names[0], packet_value, expected)
+                )
 
         routing = load_routing(args.routing_file)
         routing_errors = validate_routing(routing)
@@ -1113,6 +1260,8 @@ def cmd_run(args):
                 "invocation path must be explicit and one of %s; got %r"
                 % (sorted(INVOCATION_PATHS), args.invocation_path)
             )
+        if args.host_tier is not None and args.host_tier not in HOST_TIERS:
+            raise ConfigError("host tier must be one of %s or omitted" % sorted(HOST_TIERS))
 
         # Session boundary rules. One invocation executes exactly one role;
         # nothing here ever chains, retries, falls back, or auto-resumes.
@@ -1139,29 +1288,58 @@ def cmd_run(args):
                 raise ConfigError(
                     "adversarial_reviewer runs only via invocation path external_cli"
                 )
+            if args.host_tier is not None:
+                raise ConfigError("external reviewer must not claim a host-local tier")
             provider, profile = resolve_external_reviewer(routing, args.host_mode)
         elif args.role == "feasibility_verifier":
-            if args.invocation_path != "active_host":
+            if args.host_mode == "codex_hosted":
+                if args.invocation_path != "host_local_cli":
+                    raise ConfigError(
+                        "codex_hosted feasibility_verifier must use host_local_cli"
+                    )
+                if args.host_tier != "scout":
+                    raise ConfigError(
+                        "codex_hosted host_local_cli feasibility requires host tier scout"
+                    )
+                scout = host_conf["local_tiers"]["scout"]
+                provider, profile = scout["provider"], scout["profile"]
+                if (
+                    provider != "codex_cli"
+                    or profile != "codex_read_only"
+                    or scout.get("model_override") != "gpt-5.6-luna"
+                    or args.model != "gpt-5.6-luna"
+                ):
+                    raise ConfigError(
+                        "host_local_cli is restricted to codex_hosted/"
+                        "feasibility_verifier/scout/codex_cli/codex_read_only/"
+                        "gpt-5.6-luna"
+                    )
+            elif args.invocation_path != "active_host":
                 raise ConfigError(
                     "feasibility_verifier is an active-host responsibility "
                     "(invocation path active_host); external CLI feasibility is "
                     "not part of the dual-host contract"
                 )
-            if host_conf["adapter_status"] != "implemented":
+            elif host_conf["adapter_status"] != "implemented":
                 return finish(
                     CAPABILITY_UNAVAILABLE,
                     "host-native execution required, but host mode %s adapter "
                     "is unavailable (fail closed)" % args.host_mode,
                 )
-            return finish(
+            else:
+                return finish(
                 CAPABILITY_UNAVAILABLE,
                 "host-native execution required: feasibility_verifier runs on "
                 "the active host (%s) through its own host-local tier dispatch "
                 "path; this external runner does not emulate the active host"
-                % host_conf["active_host"],
-            )
+                    % host_conf["active_host"],
+                )
         elif args.role == "implementer":
             if args.invocation_path == "active_host":
+                if args.host_tier not in ("worker", "executor"):
+                    raise ConfigError(
+                        "active-host implementer requires host tier worker or executor"
+                    )
                 if host_conf["adapter_status"] != "implemented":
                     return finish(
                         CAPABILITY_UNAVAILABLE,
@@ -1182,6 +1360,8 @@ def cmd_run(args):
                     "contract) or headless_cli (separately authorized opt-in); "
                     "external_cli is not a valid implementer path"
                 )
+            if args.host_tier is not None:
+                raise ConfigError("headless_cli implementer must not claim a host-local tier")
             headless = routing["headless_cli_implementation"]
             provider, profile = headless["provider"], headless["profile"]
         else:
@@ -1192,39 +1372,67 @@ def cmd_run(args):
         if provider not in EXTERNAL_PROVIDERS:
             raise ConfigError("unsupported external provider: %s" % provider)
 
-        # F-X2: mechanical external-side-effect authorization preflight.
+        # Mechanical authorization preflight. host_local_cli execution and
+        # external reviewer/headless invocation are distinct grants; neither
+        # token authorizes the other path.
         # Prompt/command wording is never authorization; the packet field and
         # the caller flag must both carry ALLOW_PROVIDER_INVOCATION and agree,
         # per invocation — an implementer authorization never covers a
         # reviewer invocation, and vice versa. Any failure here happens before
         # the child process exists (no quota, no side effect).
-        packet_text = task_file.read_text(encoding="utf-8", errors="replace")
-        packet_auth, auth_errors = parse_packet_external_authorization(packet_text)
-        if auth_errors:
-            raise ConfigError(
-                "external-side-effect authorization preflight failed: "
-                + "; ".join(auth_errors)
+        if args.invocation_path == "host_local_cli":
+            if args.external_authorization is not None:
+                raise ConfigError(
+                    "external provider authorization cannot authorize host_local_cli"
+                )
+            packet_auth, auth_errors = parse_packet_host_local_authorization(packet_text)
+            if auth_errors:
+                raise ConfigError(
+                    "host-local execution authorization preflight failed: "
+                    + "; ".join(auth_errors)
+                )
+            if (
+                args.host_local_authorization != packet_auth
+                or packet_auth != ALLOW_HOST_LOCAL_CLI_INVOCATION
+            ):
+                raise ConfigError(
+                    "host-local execution requires matching packet and CLI "
+                    "ALLOW_HOST_LOCAL_CLI_INVOCATION authorization"
+                )
+            external_packet_auth, external_errors = parse_packet_external_authorization(
+                packet_text
             )
-        flag_auth = args.external_authorization
-        if flag_auth is None:
-            raise ConfigError(
-                "external-side-effect authorization must also be passed "
-                "explicitly via --external-authorization and match the task "
-                "packet (fail closed; a caller-side value alone is never "
-                "sufficient, and a packet value alone is never assumed)"
-            )
-        if flag_auth != packet_auth:
-            raise ConfigError(
-                "external-side-effect authorization mismatch: packet=%r flag=%r "
-                "(fail closed; provider not spawned)" % (packet_auth, flag_auth)
-            )
-        if packet_auth != ALLOW_PROVIDER_INVOCATION:
-            raise ConfigError(
-                "external provider invocation is not authorized: packet carries "
-                "%r, expected %s; provider not spawned"
-                % (packet_auth, ALLOW_PROVIDER_INVOCATION)
-            )
-        invocation["external_side_effect_authorization"] = packet_auth
+            if external_errors or external_packet_auth == ALLOW_PROVIDER_INVOCATION:
+                raise ConfigError(
+                    "host-local scout packet must explicitly withhold external "
+                    "provider authorization"
+                )
+            invocation["host_local_execution_authorization"] = packet_auth
+        else:
+            if args.host_local_authorization is not None:
+                raise ConfigError(
+                    "host-local execution authorization cannot authorize external_cli "
+                    "or headless_cli"
+                )
+            packet_auth, auth_errors = parse_packet_external_authorization(packet_text)
+            if auth_errors:
+                raise ConfigError(
+                    "external-side-effect authorization preflight failed: "
+                    + "; ".join(auth_errors)
+                )
+            flag_auth = args.external_authorization
+            if flag_auth is None or flag_auth != packet_auth:
+                raise ConfigError(
+                    "external-side-effect authorization mismatch between packet "
+                    "and --external-authorization"
+                )
+            if packet_auth != ALLOW_PROVIDER_INVOCATION:
+                raise ConfigError(
+                    "external provider invocation is not authorized: packet carries "
+                    "%r, expected %s; provider not spawned"
+                    % (packet_auth, ALLOW_PROVIDER_INVOCATION)
+                )
+            invocation["external_side_effect_authorization"] = packet_auth
 
         # Copy controller inputs into the bundle.
         shutil.copyfile(task_file, artifact_dir / "task.md")
@@ -1232,6 +1440,15 @@ def cmd_run(args):
 
         pre_state = _snapshot_git(workdir)
         _write_json(artifact_dir / "pre-git.json", pre_state)
+        if pre_state["head"] != args.target_repository_head:
+            raise ConfigError(
+                "target repository HEAD mismatch: packet/invocation=%s actual=%s"
+                % (args.target_repository_head, pre_state["head"])
+            )
+        if _status_evidence(pre_state["status_short"]) != args.target_repository_status:
+            raise ConfigError(
+                "target repository status/dirty-state evidence mismatch"
+            )
 
         if args.role == "implementer" and (
             pre_state["status_entries"]
@@ -1246,7 +1463,12 @@ def cmd_run(args):
             )
 
         argv, provider_meta = build_provider_command(
-            provider, profile, args.model, workdir, artifact_dir
+            provider,
+            profile,
+            args.model,
+            workdir,
+            artifact_dir,
+            provider_schema_file,
         )
         invocation["sandbox"] = provider_meta["sandbox"]
         invocation["approval_policy"] = provider_meta["approval_policy"]
@@ -1327,9 +1549,10 @@ def cmd_run(args):
     else:
         result, result_error = _extract_claude_result(stdout_path)
         if result is not None:
-            _write_json(artifact_dir / "final-result.json", result)
-    if result is not None and isinstance(result.get("session_id"), str):
-        invocation["session_id"] = result["session_id"]
+            _write_json(artifact_dir / "provider-result.json", result)
+    provider_metadata = _extract_provider_metadata(stdout_path)
+    invocation["reported_model"] = provider_metadata["reported_model"]
+    invocation["session_id"] = provider_metadata["session_id"]
 
     # ---- classification (priority: never let a lesser class mask a safety failure) ----
     if timed_out:
@@ -1365,21 +1588,31 @@ def cmd_run(args):
         )
     if result is None:
         return finish(INVALID_OUTPUT, result_error or "final structured result missing")
-    validation_errors = validate_result(
-        result,
-        args.role,
-        provider,
-        profile,
-        args.model,
-        identity={
-            "host_mode": args.host_mode,
-            "execution_host": invocation["execution_host"],
-            "invocation_path": args.invocation_path,
-            "governance_identity": governance_identity,
-        },
-    )
+    validation_errors = validate_result(result, args.role)
     if validation_errors:
         return finish(INVALID_OUTPUT, "result validation failed: " + "; ".join(validation_errors))
+    provenance = {
+        "governance_identity": governance_identity,
+        "authoritative_plan_sha": args.authoritative_plan_sha,
+        "candidate_sha": args.candidate_sha,
+        "target_repository_head": args.target_repository_head,
+        "host_mode": args.host_mode,
+        "execution_host": invocation["execution_host"],
+        "host_tier": args.host_tier,
+        "role": args.role,
+        "provider": provider,
+        "profile": profile,
+        "requested_model": args.model,
+        "reported_model": provider_metadata["reported_model"],
+        "invocation_path": args.invocation_path,
+        "session_id": provider_metadata["session_id"],
+    }
+    canonical_result = {
+        "schema_version": 3,
+        "provenance": provenance,
+        "provider_result": result,
+    }
+    _write_json(artifact_dir / "final-result.json", canonical_result)
     outcome = map_verdict_outcome(result)
     if outcome == MODEL_REPORTED_BLOCKER:
         return finish(MODEL_REPORTED_BLOCKER, "model reported a blocker: %r" % result["stop_reason"])
@@ -1412,6 +1645,7 @@ def build_parser():
     # Host/tier and governance identity are validated fail-closed inside
     # cmd_run (CONFIGURATION_ERROR with evidence), not by argparse.
     run_parser.add_argument("--host-mode")
+    run_parser.add_argument("--host-tier")
     run_parser.add_argument("--invocation-path")
     run_parser.add_argument("--governance-authority", dest="governance_authority")
     run_parser.add_argument("--authorization-issuer", dest="authorization_issuer")
@@ -1424,12 +1658,21 @@ def build_parser():
         help="must equal the task packet's External-side-effect authorization "
         "value; both are required before any provider spawn (fail closed)",
     )
+    run_parser.add_argument(
+        "--host-local-authorization",
+        dest="host_local_authorization",
+        help="must equal the packet's Host-local execution authorization; "
+        "valid only for the Codex-hosted scout host_local_cli path",
+    )
     run_parser.add_argument("--workdir", required=True)
     run_parser.add_argument("--task-file", required=True)
     run_parser.add_argument("--artifact-dir", required=True)
     run_parser.add_argument("--timeout-seconds", required=True, type=_positive_int)
     run_parser.add_argument("--model", required=True)
     run_parser.add_argument("--authoritative-plan-sha")
+    run_parser.add_argument("--candidate-sha")
+    run_parser.add_argument("--target-repository-head")
+    run_parser.add_argument("--target-repository-status")
     run_parser.add_argument("--base-sha")
     run_parser.add_argument("--target-sha")
     run_parser.add_argument("--allowed-file", action="append", default=[])

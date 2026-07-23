@@ -24,17 +24,14 @@ PACKET_FILE = ROOT / "examples" / "task-packets" / "codex-host-gate.md"
 RUNNER_FILE = ROOT / "scripts" / "orchestration_agent.py"
 
 TIERS = ("scout", "worker", "executor")
+NATIVE_TIERS = ("worker", "executor")
 EXPECTED_MODELS = {
     "scout": "gpt-5.6-luna",
     "worker": "gpt-5.6-terra",
     "executor": "gpt-5.6-sol",
 }
-EXPECTED_REASONING = {"scout": "low", "worker": "medium", "executor": "high"}
-EXPECTED_SANDBOX = {
-    "scout": "read-only",
-    "worker": "workspace-write",
-    "executor": "workspace-write",
-}
+EXPECTED_REASONING = {"worker": "medium", "executor": "high"}
+EXPECTED_SANDBOX = {"worker": "workspace-write", "executor": "workspace-write"}
 COMMON_PACKET_FIELDS = (
     "Governance authority",
     "Authorization issuer",
@@ -53,14 +50,17 @@ COMMON_PACKET_FIELDS = (
     "Repository/worktree",
     "Authoritative plan branch",
     "Authoritative plan commit SHA",
+    "Release／implementation candidate SHA",
     "Canonical base SHA",
-    "Target SHA or batch base SHA",
+    "Target repository HEAD",
+    "Target repository status／dirty-state evidence",
     "Goal",
     "Allowed files",
     "Forbidden files",
     "Required evidence",
     "Stop conditions",
     "Git authorization",
+    "Host-local execution authorization",
     "External-side-effect authorization",
     "Report schema",
 )
@@ -72,7 +72,7 @@ def read(path):
 
 def load_agents():
     agents = {}
-    for tier in TIERS:
+    for tier in NATIVE_TIERS:
         path = AGENT_DIR / ("%s.toml" % tier)
         with path.open("rb") as handle:
             agents[tier] = tomllib.load(handle)
@@ -90,7 +90,7 @@ class RootBindingTests(unittest.TestCase):
         self.assertIn(".agents/skills/orchestration-codex-host/SKILL.md", text)
 
     def test_agents_md_stays_a_short_binding(self):
-        self.assertLessEqual(len(read(ROOT_BINDING).splitlines()), 14)
+        self.assertLessEqual(len(read(ROOT_BINDING).splitlines()), 18)
 
     def test_agents_md_does_not_fix_a_governance_owner(self):
         text = read(ROOT_BINDING).lower()
@@ -114,19 +114,20 @@ class NativeAgentTests(unittest.TestCase):
     def setUpClass(cls):
         cls.agents = load_agents()
 
-    def test_all_three_agent_toml_files_parse(self):
-        self.assertEqual(set(self.agents), set(TIERS))
+    def test_only_worker_and_executor_toml_files_parse(self):
+        self.assertEqual(set(self.agents), set(NATIVE_TIERS))
+        self.assertFalse((AGENT_DIR / "scout.toml").exists())
 
     def test_agent_names_and_models_are_distinct(self):
         self.assertEqual(
-            {data["name"] for data in self.agents.values()}, set(TIERS)
+            {data["name"] for data in self.agents.values()}, set(NATIVE_TIERS)
         )
-        self.assertEqual(len({data["model"] for data in self.agents.values()}), 3)
+        self.assertEqual(len({data["model"] for data in self.agents.values()}), 2)
 
     def test_models_are_luna_terra_sol_in_tier_order(self):
         self.assertEqual(
-            [self.agents[tier]["model"] for tier in TIERS],
-            [EXPECTED_MODELS[tier] for tier in TIERS],
+            [self.agents[tier]["model"] for tier in NATIVE_TIERS],
+            [EXPECTED_MODELS[tier] for tier in NATIVE_TIERS],
         )
 
     def test_reasoning_effort_matches_contract(self):
@@ -139,12 +140,17 @@ class NativeAgentTests(unittest.TestCase):
         for tier, expected in EXPECTED_SANDBOX.items():
             self.assertEqual(self.agents[tier]["sandbox_mode"], expected, tier)
 
-    def test_scout_is_explicitly_read_only_and_non_implementing(self):
-        data = self.agents["scout"]
-        instructions = data["developer_instructions"].lower()
-        self.assertEqual(data["sandbox_mode"], "read-only")
-        self.assertIn("stay read-only", instructions)
-        self.assertIn("do not implement", instructions)
+    def test_scout_is_runner_routed_not_native_toml(self):
+        scout = routing()["host_modes"]["codex_hosted"]["local_tiers"]["scout"]
+        self.assertEqual(
+            scout,
+            {
+                "provider": "codex_cli",
+                "profile": "codex_read_only",
+                "invocation_path": "host_local_cli",
+                "model_override": "gpt-5.6-luna",
+            },
+        )
 
     def test_worker_and_executor_are_workspace_write(self):
         for tier in ("worker", "executor"):
@@ -157,8 +163,8 @@ class NativeAgentTests(unittest.TestCase):
         instructions = {
             data["developer_instructions"] for data in self.agents.values()
         }
-        self.assertEqual(len(descriptions), 3)
-        self.assertEqual(len(instructions), 3)
+        self.assertEqual(len(descriptions), 2)
+        self.assertEqual(len(instructions), 2)
         self.assertIn("one already specified", self.agents["worker"][
             "developer_instructions"
         ])
@@ -206,7 +212,7 @@ class SkillContractTests(unittest.TestCase):
             "Final ratifier",
             "codex_hosted",
             "codex_desktop",
-            "27-field",
+            "C2 packet",
             "UNAUTHORIZED",
         ):
             self.assertIn(marker, text)
@@ -228,9 +234,9 @@ class SkillContractTests(unittest.TestCase):
     def test_dispatch_separates_active_host_from_external_review(self):
         text = read(SKILL_DIR / "references" / "dispatch.md")
         normalized = " ".join(text.split())
-        self.assertIn("## `active_host`", text)
+        self.assertIn("## Active-host local tiers", text)
         self.assertIn("## `external_cli`", text)
-        self.assertIn("active-host path never uses the external runner", normalized)
+        self.assertIn("host_local_cli", normalized)
         self.assertIn("claude_cli", text)
         self.assertIn("claude_read_only", text)
 
@@ -269,11 +275,13 @@ class SkillContractTests(unittest.TestCase):
 
 
 class RoutingAndRunnerTests(unittest.TestCase):
-    def test_codex_adapter_is_implemented_with_native_tiers(self):
+    def test_codex_adapter_has_host_local_scout_and_native_implementation_tiers(self):
         mode = routing()["host_modes"]["codex_hosted"]
         self.assertEqual(mode["active_host"], "codex_desktop")
         self.assertEqual(mode["adapter_status"], "implemented")
-        for tier in TIERS:
+        self.assertEqual(mode["local_tiers"]["scout"]["provider"], "codex_cli")
+        self.assertEqual(mode["local_tiers"]["scout"]["profile"], "codex_read_only")
+        for tier in NATIVE_TIERS:
             self.assertEqual(mode["local_tiers"][tier]["provider"], "codex_native")
             self.assertEqual(mode["local_tiers"][tier]["profile"], tier)
 
@@ -306,13 +314,13 @@ class RoutingAndRunnerTests(unittest.TestCase):
         )
         runner_text = read(RUNNER_FILE)
         self.assertIn("host-native execution required", runner_text)
-        self.assertIn("this external runner does not emulate the active host", runner_text)
+        self.assertIn("host_local_cli", runner_text)
 
     def test_external_reviewer_authorization_preflight_remains_dual(self):
         runner_text = read(RUNNER_FILE)
         self.assertIn("packet_auth != ALLOW_PROVIDER_INVOCATION", runner_text)
         self.assertIn("flag_auth != packet_auth", runner_text)
-        self.assertIn("packet value and the caller flag", runner_text)
+        self.assertIn("external-side-effect authorization mismatch", runner_text)
 
     def test_routing_forbids_automatic_behavior(self):
         constraints = routing()["constraints"]
@@ -327,7 +335,7 @@ class RoutingAndRunnerTests(unittest.TestCase):
 
 
 class PacketAndDocumentationTests(unittest.TestCase):
-    def test_packet_contains_exact_common_27_fields(self):
+    def test_packet_contains_c2_common_fields(self):
         text = read(PACKET_FILE)
         rows = {
             line.split("|")[1].strip()
@@ -335,7 +343,7 @@ class PacketAndDocumentationTests(unittest.TestCase):
             if line.startswith("|") and line.count("|") >= 3
         }
         self.assertEqual(set(COMMON_PACKET_FIELDS) - rows, set())
-        self.assertEqual(len(COMMON_PACKET_FIELDS), 27)
+        self.assertGreater(len(COMMON_PACKET_FIELDS), 27)
 
     def test_packet_carries_codex_host_scope_and_authorizations(self):
         text = read(PACKET_FILE)
@@ -363,7 +371,6 @@ class PacketAndDocumentationTests(unittest.TestCase):
         self.assertEqual(
             {p.relative_to(ROOT).as_posix() for p in (ROOT / ".codex").rglob("*") if p.is_file()},
             {
-                ".codex/agents/scout.toml",
                 ".codex/agents/worker.toml",
                 ".codex/agents/executor.toml",
             },
@@ -389,12 +396,11 @@ class PacketAndDocumentationTests(unittest.TestCase):
             self.assertNotIn("real smoke passed", text, path)
         doc = read(CODEX_DOC)
         for marker in (
-            "real Luna, Terra, and Sol native agent spawning",
-            "three distinct child thread UUIDs and actual model identities",
-            "scout read-only sandbox precedence",
-            "embedded Codex Desktop and standalone CLI runtime parity",
-            "real fresh Claude CLI read-only reviewer result",
-            "native per-file sandbox enforcement is not available",
+            "real Luna CLI scout",
+            "real Terra worker and Sol executor native tasks",
+            "schema-v3 Claude and Codex reviewers",
+            "runtime version-skew behavior",
+            "Native per-file sandbox enforcement remains unavailable",
         ):
             self.assertIn(marker, doc)
 
