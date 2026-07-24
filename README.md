@@ -133,16 +133,16 @@ no-overwrite distribution.
 
 Established real evidence is narrower: earlier Codex CLI probes preserved JSONL
 events and exercised timeout, process-group termination, partial transcripts,
-and manifests. C1 fixed two discovered real-CLI contract defects, but the fixed
-paths have not yet been rechecked with a real CLI.
+and manifests. The Luna/low Codex-host scout formal runner recheck passed in one
+fresh invocation with exit 0, including schema v3, semantic, read-only/mutation,
+and manifest validation.
 
 Real smoke proved that the former native Codex scout sandbox did not enforce
 read-only in the observed embedded runtime, so that default was retired. Real
-recheck remains pending for Luna CLI scout, native Terra/Sol tasks, both
-schema-v3 reciprocal reviewers, and embedded-versus-standalone Codex runtime
-version skew. Native per-file sandbox enforcement and a
-native Plugin Directory package are unavailable.
-This project is not a Xinghui Runtime adapter.
+rechecks remain pending for native Terra/Sol tasks, both schema-v3 reciprocal
+reviewers, and embedded-versus-standalone Codex runtime version skew. Native
+per-file sandbox enforcement and a native Plugin Directory package are
+unavailable. This project is not a Xinghui Runtime adapter.
 
 ## License
 

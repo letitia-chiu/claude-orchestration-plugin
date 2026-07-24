@@ -33,6 +33,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   neither a reviewer nor fallback. External reviewers remain reciprocal;
   headless Codex implementation remains a separately authorized, non-default
   opt-in.
+- The Luna/low Codex-host scout formal runner recheck passed in one fresh
+  invocation with exit 0. Schema v3, semantic, read-only/mutation, and manifest
+  validation all passed.
 - Kickoff, go, dispatch, and wrapup now preserve authoritative-plan identity,
   five governance identities, host/tier/model identity, allowed/forbidden
   files, separate execution/Git/provider authorization, and distinct
@@ -64,12 +67,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Codex-hosted → Claude CLI review.
 - Real smoke showed that the former native Codex scout TOML did not enforce
   read-only in the observed embedded runtime; it is no longer a default safety
-  boundary. Corrective real recheck remains pending for Luna CLI scout, native
-  Terra/Sol, schema-v3 reciprocal reviewers, and runtime version skew.
+  boundary. Real rechecks remain pending for native Terra/Sol, schema-v3
+  reciprocal reviewers, and runtime version skew.
 - Native per-file sandbox enforcement is unavailable. Codex distribution is a
   repository-local materializer, not a native Plugin Directory package.
-- Two defects found by earlier real Codex CLI probes were fixed in C1, but those
-  corrected paths have not yet received a real-CLI recheck.
 
 ## [0.5.0] - 2026-07-21
 

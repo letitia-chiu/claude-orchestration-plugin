@@ -123,15 +123,15 @@ authorization preflight、timeout／Git／manifest，以及 transactional
 no-overwrite distribution。
 
 已经成立的 real evidence 较窄：先前 Codex CLI probe 已证明 JSONL event 保存，
-并跑过 timeout、process-group termination、partial transcript 与 manifest。
-C1 已修正两个 real-CLI contract defect，但修正后尚未用 real CLI recheck。
+并跑过 timeout、process-group termination、partial transcript 与 manifest。Luna／
+low Codex-host scout formal runner recheck 已在一次 fresh invocation 中通过，
+exit 0，且 schema v3、semantic、read-only／mutation 与 manifest validation 均 PASS。
 
 Real smoke 已证明旧 native Codex scout sandbox 在观察到的 embedded runtime
-没有形成 read-only 边界，因此该默认已撤除。仍待 real recheck：Luna CLI
-scout、native Terra／Sol、两边 schema-v3 reviewer，以及 embedded／standalone
-Codex runtime version skew。
-目前没有 native per-file sandbox enforcement，也没有 native Plugin Directory
-package。本项目不是 Xinghui Runtime adapter。
+没有形成 read-only 边界，因此该默认已撤除。仍待 real recheck：native
+Terra／Sol、两边 schema-v3 reciprocal reviewer，以及 embedded／standalone
+Codex runtime version skew。目前没有 native per-file sandbox enforcement，
+也没有 native Plugin Directory package。本项目不是 Xinghui Runtime adapter。
 
 ## 许可证
 

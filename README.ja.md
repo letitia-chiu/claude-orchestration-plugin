@@ -131,16 +131,16 @@ distribution を対象にしています。
 
 確立済みの real evidence は限定的です。以前の Codex CLI probe では JSONL
 event の保存と、timeout、process-group termination、partial transcript、
-manifest を確認しました。C1 は2件の real-CLI contract defect を修正しましたが、
-修正後のパスは real CLI でまだ recheck していません。
+manifest を確認しました。Luna／low Codex-host scout formal runner recheck は
+1回の fresh invocation で通過し、exit 0、schema v3、semantic、
+read-only／mutation、manifest validation はすべて PASS でした。
 
 Real smoke は旧 native Codex scout sandbox が observed embedded runtime で
 read-only 境界にならないことを示したため、その既定は撤回されました。
-Luna CLI scout、native Terra／Sol、両 schema-v3 reviewer、
-embedded／standalone Codex runtime version skew の real recheck は未実施です。
-native per-file sandbox enforcement
-と native Plugin Directory package はありません。このプロジェクトは
-Xinghui Runtime adapter ではありません。
+native Terra／Sol、両 schema-v3 reciprocal reviewer、embedded／standalone
+Codex runtime version skew の real recheck は未実施です。native per-file
+sandbox enforcement と native Plugin Directory package はありません。
+このプロジェクトは Xinghui Runtime adapter ではありません。
 
 ## ライセンス
 
