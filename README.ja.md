@@ -1,88 +1,147 @@
-# orchestration — Claude Code のための「統率と委任」ワークフロー
+# orchestration — Claude と Codex のデュアルホスト・オーケストレーション
 
 [English](README.md) · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md) · **日本語**
 
-シンプルなアイデアをパッケージ化した、プロジェクト横断のスラッシュコマンドとサブエージェントのセットです。**メインセッションは最もコストの高いトークンなのだから、「考えること」だけに専念すべきである——計画を立て、作業を分解し、検証し、引き継ぐ。機械的な偵察・実装・力仕事は、モデルを固定した3つのサブエージェントに任せる。** これをどのプロジェクトにインストールしても、メインセッションは単純作業をしなくなります。
+Version: **0.7.0**
 
-> 🌐 **あなたの言語で動きます。** コマンドとサブエージェントはメンテナンス性のために英語で書かれていますが、そのすべてに「あなたの言語をミラーリングせよ」という指示が組み込まれています。日本語でチャットすれば、Claude は日本語で計画を立て、質問し、報告します。繁体字中国語でチャットすれば、繁体字中国語で答えます。内部を英語化することは、アシスタントを英語専用にすることを**意味しません**。
+この repository は、1つの governance-neutral なオーケストレーション契約と、
+2つの active-host adapter を提供します。Claude Desktop／Claude Code は
+Claude-native agents、Codex Desktop は Desktop-controlled host-local CLI
+scout と native worker／executor でワークフローを
+実行します。どちらの host も、凍結した候補を相手 provider の CLI に渡し、
+fresh、read-only の敵対的レビューを受けられます。
 
-## インストール
+中核となる分離は次のとおりです。
 
-プラグインマーケットプレイスから（公開リポジトリ）:
-
+```text
+governance authority
+!= active execution host
+!= host-local scout / worker / executor tier
+!= external adversarial reviewer
 ```
+
+Governance は ChatGPT、Claude、Codex、その他の製品に固定されません。各 task
+packet が governance authority、authorization issuer、acceptance owner、
+finding adjudicator、final ratifier を明示します。host、model、reviewer は、
+自分の役割からこれらの権限を推論できません。
+
+## Host modes と三層の同型性
+
+| Host mode | Active host | Host-local tiers | External reviewer |
+|---|---|---|---|
+| `claude_hosted` | Claude Desktop／Claude Code | Claude-native `scout` / `worker` / `executor` | Codex CLI / `codex_read_only` |
+| `codex_hosted` | Codex Desktop | scout＝`host_local_cli` Codex CLI／Luna、worker／executor＝native Terra／Sol | Claude CLI / `claude_read_only` |
+
+`scout` は読み取り専用の inventory と狭い feasibility、`worker` は1つの
+invariant または defect family の仕様済み implementation、`executor` は
+モジュール横断または高リスク契約の closure を担当します。上位 tier でも、
+ファイル、Git、acceptance、adjudication、ratification、governance authority
+は増えません。
+
+Codex-hosted feasibility は別途認可された Desktop-controlled
+`host_local_cli / codex_cli / codex_read_only / gpt-5.6-luna` を使い、
+worker／executor は native Desktop Terra／Sol のままです。scout は external
+reviewer や fallback ではありません。Implementer は reviewer を開始できず、
+automatic reviewer dispatch、retry、fallback、model switching、role chaining
+もありません。`headless_cli` implementation は、別途認可が必要な非既定の
+opt-in です。
+
+## Claude-hosted のインストール
+
+Claude plugin marketplace からインストールします。
+
+```text
 /plugin marketplace add letitia-chiu/claude-orchestration-plugin
 /plugin install orchestration@orchestration-marketplace
 ```
 
-マーケットプレイスを介さずに開発中に試す場合:
+開発モード:
 
-```
+```bash
 claude --plugin-dir /path/to/claude-orchestration-plugin
 ```
 
-インストール後、コマンドはプラグイン名で名前空間化されて表示されます: `/orchestration:kickoff`、`/orchestration:go`、`/orchestration:dispatch`、`/orchestration:wrapup`、`/orchestration:init-playbook`。
+Claude-hosted の正式 surface は、namespaced commands
+（`/orchestration:kickoff`、`/orchestration:go`、
+`/orchestration:dispatch`、`/orchestration:wrapup`、
+`/orchestration:init-playbook`）と、`agents/scout.md`、
+`agents/worker.md`、`agents/executor.md` です。
 
-## 三層アーキテクチャ
+Claude model は同名 agent shadowing で update-safe に上書きできます。
+優先順位は project `.claude/agents/`、user `~/.claude/agents/`、plugin で、
+例は `examples/agents/` にあります。Claude-hosted の adversarial review は、
+別途認可された fresh な Codex CLI read-only session を使います。
 
-```
-Orchestrator（メインセッション — 利用可能な最強のモデル + 高いエフォート）
-│  やることは限定的: リクエストの理解、盲点/質問の洗い出し、作業の分解、
-│  ディスパッチ、敵対的検証、統合、引き継ぎ。
-│
-├─ scout    = Haiku 4.5   読み取り専用の偵察（ファイルを探す／コードを読む／
-│                          現状を要約する — 結論のみ返す。ツールは
-│                          Read/Glob/Grep にロックされている）
-├─ worker   = Sonnet 5    デフォルトの実行担当（仕様が明確な実装／テスト／
-│                          一括編集／ドキュメント）
-└─ executor = Opus 4.8    難しい実行担当（既に仕様化された大規模リファクタリング／
-                          精密な編集 — 1行目で自分のモデルIDを自己申告するので、
-                          誤って違う階層を動かしていることに気づかず進む心配がない）
-```
+## Codex-hosted のインストール
 
-5つのスラッシュコマンドが、ワークフローの各段階に対応しています。
+Plugin checkout にあるファイルは、別の repository に自動では現れません。
+Codex-host adapter を明示した target Git root に materialize します。
 
-| コマンド | 内容 |
-|---|---|
-| `/orchestration:kickoff` | 開始儀式: 盲点の洗い出し → 質問 → 計画（ディスパッチの分割方法を含む）——**計画で停止し、実行は開始しない** |
-| `/orchestration:go` | 実行指示: ユーザーがこのコマンドを出して初めて実行が始まる（許可は使用時に新しく注入されるため、長い対話でも薄まらない） |
-| `/orchestration:dispatch` | タスクを6項目からなる派工単（ディスパッチオーダー）に変換し、適切な階層へ送る |
-| `/orchestration:wrapup` | 締めの儀式: 検証バッテリー → 既知の失敗チェック → 引き継ぎ |
-| `/orchestration:init-playbook` | 対象プロジェクトに `docs/playbook/` の骨格を生成する（既存ファイルは上書きしない） |
-
-各階層の背後にあるコスト感覚（API価格の比率であり、サブスクリプションのクォータもほぼ同じ傾向）: **Haiku : Sonnet : Opus ≈ 1 : 3 : 15。** orchestrator が使うトークン1つ1つがシステム内で最もコストの高いトークンです——だからこそ、生の読み取りや機械的な編集は下位に委任し、判断だけを自分の手元に残します。
-
-## 階層ごとのモデルをカスタマイズ（更新に強い）
-
-各階層は既定値を固定して出荷されます: `scout` = `claude-haiku-4-5-20251001`、`worker` = `claude-sonnet-5`、`executor` = `claude-opus-4-8`。これは妥当な出発点であって、固定ではありません。
-
-ある階層を別のモデルで動かしたいとき、**plugin の `agents/*.md` を編集しないでください**——plugin を更新すると上書きされ、変更は失われます。Claude Code の `settings.json` にも「エージェントごとのモデル指定」スイッチはありません。唯一の更新に強い仕組みが**同名シャドーイング（agent shadowing）**です: 自分の scope に同じ `name:` のサブエージェントを置くと plugin 版を丸ごと置き換え、しかも更新が決して触れない場所に存在します。優先順位は高い順に: プロジェクト `.claude/agents/` → ユーザー `~/.claude/agents/` → plugin。
-
-そのままコピーして使える override は [`examples/agents/`](examples/agents/) にあります——変えたい階層をコピーし、`model:` の行だけ編集します:
-
-```
-# どこでも適用（ユーザー scope）……
-cp examples/agents/executor.md ~/.claude/agents/executor.md
-# ……または特定プロジェクトのみ（プロジェクト scope）
-cp examples/agents/worker.md   .claude/agents/worker.md
-# あとはファイルを開いて `model:` の行を変更
+```bash
+python3 scripts/init_codex_host.py \
+  --target /absolute/path/to/target-repository
 ```
 
-注意点は2つ、いずれも範例ファイル冒頭のコメントにも記載しています:
+書き込まずに確認する場合:
 
-- override は **plugin のエージェントを丸ごと置き換えます**（本体も含む）。したがって plugin 側のエージェント指示の改善はこのコピーには届きません——必要なら手動で再同期してください。
-- `executor` には「起動時にモデル ID を自己申告し、不一致なら停止する」フィンガープリント探針が入っています。`model:` を変えたら本体の対応する model ID も合わせて変更しないと、自身のチェックで停止します。
+```bash
+python3 scripts/init_codex_host.py \
+  --target /absolute/path/to/target-repository \
+  --check
+```
 
-一時的に**全階層**を一つのモデルへ一括で寄せたい場合（階層別ではなく）は、環境変数 `CLAUDE_CODE_SUBAGENT_MODEL` で全サブエージェントを一度に上書きできます。
+Target は既存の absolute path の Git repository でなければなりません。
+Materializer はちょうど20個の repository-local ファイルをインストールします。
+対象は `AGENTS.md`、2つの native `.codex/agents`（worker／executor）、Codex-host skill と references、
+shared playbook／routing／schema／task packets、Claude reviewer runner です。
 
-## エンジンであって、ドメイン知識ではない
+インストールは transactional no-overwrite です。missing file はコピーし、
+identical file には触れません。existing different file が1つでもあれば、
+実行全体がゼロ書き込みで失敗します。内容の異なる `AGENTS.md` が存在する場合、
+repository owner による手動マージが必要です。Plugin 更新後の再実行も安全で、
+未変更ファイルは no-op、project-local customization は上書きではなく
+conflict になります。
 
-このプラグインが提供するのは**エンジン**です: 役割分担（scout/worker/executor——そのモデルの固定と責任範囲）、ワークフロー（kickoff / dispatch / wrap-up の各儀式）、そして脱プロジェクト化・汎用化された1本の `orchestration.md` 方法論です。
+Materializer は global Codex／Claude config を変更せず、provider を呼び出さず、
+Git write も行いません。これは repository-local materializer であり、native
+Codex Plugin Directory package ではありません。Codex-hosted reviewer は target
+内の `scripts/orchestration_agent.py`、`docs/playbook/agent-routing.json`、
+`examples/schemas/orchestration-result.schema.json` を使用します。
 
-意図的に提供**しない**のは、あなたのプロジェクト固有のドメイン知識です: 特定のコードベースの鉄則、これまでにぶつかった落とし穴、検証バッテリーの詳細、独自の引き継ぎ規約。これらはプロジェクトが自ら育てていくべきものであり、プラグインに焼き込んでしまえば、次のプロジェクトでは邪魔になる古びた前提になるだけです。
+## Safety と evidence contract
 
-そのドメイン知識のための入口が `/orchestration:init-playbook` です。対象プロジェクトに空の `docs/playbook/` 骨格を生成します（汎用の `orchestration.md`、普遍的なエンジニアリング教訓を初期シードとした `known-failures.md` の出発点、記入欄を備えたテンプレートファイルを含みます）。そのプロジェクトは、自身の開発を通じて一件ずつそこに書き込んでいきます。エンジンはどこにでもインストールできますが、ドメイン知識は自分自身のプロジェクトの中でしか育ちません。
+認可済み packet は authoritative plan SHA、release／implementation candidate
+SHA、target repository HEAD と dirty-state evidence を分離し、明示的な
+governance identity、host／tier／model、allowed／forbidden files、acceptance commands、
+stop conditions、および分離された execution、Git、external-provider
+authorization を持ちます。実際の CLI 呼び出しでは packet と runner command
+の両方に `ALLOW_PROVIDER_INVOCATION` が必要です。reviewer authorization は
+常に独立し、fresh session を開始します。
 
-## License
+Canonical schema v3 が唯一の SSOT です。Provider は機械的に抽出された
+`provider_result` だけを受け取り、runner が controller-owned immutable
+provenance を注入し、requested／reported model を分離記録します。
+
+## Capability status
+
+Source と fake-transport tests は routing schema v2、governance neutrality、
+両 host contracts、三層 static mappings、strict result validation、
+authorization preflight、timeout／Git／manifest、transactional no-overwrite
+distribution を対象にしています。
+
+確立済みの real evidence は限定的です。以前の Codex CLI probe では JSONL
+event の保存と、timeout、process-group termination、partial transcript、
+manifest を確認しました。Luna／low Codex-host scout formal runner recheck は
+1回の fresh invocation で通過し、exit 0、schema v3、semantic、
+read-only／mutation、manifest validation はすべて PASS でした。
+
+Real smoke は旧 native Codex scout sandbox が observed embedded runtime で
+read-only 境界にならないことを示したため、その既定は撤回されました。
+native Terra／Sol、両 schema-v3 reciprocal reviewer、embedded／standalone
+Codex runtime version skew の real recheck は未実施です。native per-file
+sandbox enforcement と native Plugin Directory package はありません。
+このプロジェクトは Xinghui Runtime adapter ではありません。
+
+## ライセンス
 
 [MIT](LICENSE) © 2026 letitia-chiu

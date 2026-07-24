@@ -1,87 +1,148 @@
-# orchestration — an orchestrate-and-delegate workflow for Claude Code
+# orchestration — dual-host orchestration for Claude and Codex
 
 **English** · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
-A cross-project set of slash commands and subagents that package a simple idea: **the main session is your most expensive tokens, so it should only think — planning, breaking work down, verifying, and handing off — while mechanical reconnaissance, implementation, and heavy lifting go to three model-pinned subagents.** Install it on any project and your main session stops doing grunt work.
+Version: **0.7.0**
 
-> 🌐 **Works in your language.** The commands and subagents are authored in English for maintainability, but every one of them instructs Claude to *mirror your language*. Chat in Japanese and Claude plans, asks, and reports back in Japanese; chat in Traditional Chinese and it answers in Traditional Chinese. Englishifying the internals does **not** make the assistant English-only.
+This repository provides one governance-neutral orchestration contract with two
+active-host adapters. Claude Desktop / Claude Code can run the workflow with
+Claude-native agents. Codex Desktop uses a Desktop-controlled host-local CLI
+scout and native worker/executor agents.
+Either host may hand a frozen candidate to the other provider's CLI for a fresh,
+read-only adversarial review.
 
-## Install
+The core separation is:
 
-From the plugin marketplace (public repo):
-
+```text
+governance authority
+!= active execution host
+!= host-local scout / worker / executor tier
+!= external adversarial reviewer
 ```
+
+Governance is not fixed to ChatGPT, Claude, Codex, or another product. Every
+task packet explicitly names the governance authority, authorization issuer,
+acceptance owner, finding adjudicator, and final ratifier. A host, model, or
+reviewer cannot infer those powers from its role.
+
+## Host modes and tier parity
+
+| Host mode | Active host | Host-local tiers | External reviewer |
+|---|---|---|---|
+| `claude_hosted` | Claude Desktop / Claude Code | `scout` / `worker` / `executor` using Claude-native model tiers | Codex CLI / `codex_read_only` |
+| `codex_hosted` | Codex Desktop | scout = `host_local_cli` Codex CLI / Luna; worker/executor = native Terra/Sol | Claude CLI / `claude_read_only` |
+
+`scout` handles read-only inventory and narrow feasibility, `worker` handles a
+specified implementation with one invariant or defect family, and `executor`
+owns cross-module or high-risk contractual closure. Higher capability never
+adds file, Git, acceptance, adjudication, ratification, or governance authority.
+
+Codex-hosted feasibility uses the separately authorized Desktop-controlled
+`host_local_cli / codex_cli / codex_read_only / gpt-5.6-luna` tier.
+Worker/executor implementation stays native Desktop Terra/Sol. This scout path
+is not an external reviewer or fallback. The implementer cannot start
+the reviewer, and there is no automatic reviewer dispatch, retry, fallback,
+model switching, or role chaining. `headless_cli` implementation is a
+non-default opt-in that requires separate authorization.
+
+## Install for a Claude-hosted project
+
+Install from the Claude plugin marketplace:
+
+```text
 /plugin marketplace add letitia-chiu/claude-orchestration-plugin
 /plugin install orchestration@orchestration-marketplace
 ```
 
-To try it during development without the marketplace flow:
+For development:
 
-```
+```bash
 claude --plugin-dir /path/to/claude-orchestration-plugin
 ```
 
-Once installed, the commands appear namespaced by the plugin: `/orchestration:kickoff`, `/orchestration:go`, `/orchestration:dispatch`, `/orchestration:wrapup`, `/orchestration:init-playbook`.
+The Claude-hosted surface is the namespaced command set
+(`/orchestration:kickoff`, `/orchestration:go`, `/orchestration:dispatch`,
+`/orchestration:wrapup`, `/orchestration:init-playbook`) plus
+`agents/scout.md`, `agents/worker.md`, and `agents/executor.md`.
 
-## The three-tier architecture
+Claude model customization remains update-safe through same-name agent
+shadowing. Project `.claude/agents/` overrides user `~/.claude/agents/`, which
+overrides the plugin; ready-to-copy examples live in `examples/agents/`.
+Claude-hosted adversarial review uses a separately authorized, fresh Codex CLI
+read-only session.
 
-```
-Orchestrator (main session — the strongest available model + high effort)
-│  Only does: understand the request, blind-spot/questions, break work down,
-│  dispatch, adversarial verification, integration, handoff.
-│
-├─ scout    = Haiku 4.5   read-only reconnaissance (find files / read code / summarize
-│                          current state — returns conclusions only; tools locked to
-│                          Read/Glob/Grep)
-├─ worker   = Sonnet 5    default execution (well-specified implementation / tests /
-│                          batch edits / docs)
-└─ executor = Opus 4.8    hard execution (already-specified large refactors / precision
-                          edits — self-reports its model ID on the first line so you
-                          never silently run the wrong tier)
-```
+## Install for a Codex-hosted project
 
-Five slash commands map to the stages of the workflow:
+Files in this plugin checkout do not automatically appear in another
+repository. Materialize the Codex-host adapter into an explicit target Git
+root:
 
-| Command | What it does |
-|---|---|
-| `/orchestration:kickoff` | Kickoff ritual: blind-spot pass → questions → plan (including how to split the dispatch) — **stops at the plan, does not start work** |
-| `/orchestration:go` | Execution order: nothing is executed until the user fires this (the authorization is injected fresh at the moment of use, so it can't be diluted by long context) |
-| `/orchestration:dispatch` | Turn a task into a six-field dispatch order and send it to the right tier |
-| `/orchestration:wrapup` | Wrap-up ritual: verification battery → known-failures check → handoff |
-| `/orchestration:init-playbook` | Generate the `docs/playbook/` skeleton in the target project (never overwrites existing files) |
-
-The cost intuition behind the tiers (API pricing ratio, subscription quota trends the same way): **Haiku : Sonnet : Opus ≈ 1 : 3 : 15.** Every token the orchestrator spends is the most expensive token in the system — so it delegates raw reading and mechanical edits downward and keeps only judgment for itself.
-
-## Customizing the model per tier (update-safe)
-
-The tiers ship with pinned defaults: `scout` = `claude-haiku-4-5-20251001`, `worker` = `claude-sonnet-5`, `executor` = `claude-opus-4-8`. These are sensible starting points, not a lock-in.
-
-To run a tier on a different model, **do not edit the plugin's `agents/*.md`** — a plugin update overwrites them and your change is lost. Claude Code has no per-agent model switch in `settings.json` either. The one update-safe mechanism is **agent shadowing**: a subagent with the same `name:` in your own scope fully replaces the plugin's version, and lives where updates never touch it. Precedence, highest to lowest: project `.claude/agents/` → user `~/.claude/agents/` → plugin.
-
-Ready-to-copy overrides live in [`examples/agents/`](examples/agents/) — copy the tiers you want to change and edit only the `model:` line:
-
-```
-# apply everywhere (user scope) …
-cp examples/agents/executor.md ~/.claude/agents/executor.md
-# … or just one project (project scope)
-cp examples/agents/worker.md   .claude/agents/worker.md
-# then open the file and change the `model:` line
+```bash
+python3 scripts/init_codex_host.py \
+  --target /absolute/path/to/target-repository
 ```
 
-Two caveats, both spelled out in the example files' header comments:
+Check an installation without writing:
 
-- An override **replaces the plugin agent wholesale** (body included), so later improvements to the plugin's agent instructions won't reach your copy — re-sync by hand if you want them.
-- The `executor` carries a model-self-report probe that halts on mismatch; if you change its `model:`, update the matching model ID in its body too.
+```bash
+python3 scripts/init_codex_host.py \
+  --target /absolute/path/to/target-repository \
+  --check
+```
 
-If you'd rather push *every* tier onto one model temporarily (not per-tier), the `CLAUDE_CODE_SUBAGENT_MODEL` environment variable overrides all subagents at once.
+The target must be an existing absolute Git repository path. The materializer
+installs exactly 20 repository-local files: `AGENTS.md`, the two native
+`.codex/agents` worker/executor definitions, the Codex-host skill and references, the shared
+playbook/routing/schema/task packets, and the Claude reviewer runner.
 
-## The engine, not the domain knowledge
+Installation is transactional and no-overwrite. Missing files are copied,
+identical files are left untouched, and any different file makes the whole run
+fail with zero writes. A different existing `AGENTS.md` requires a repository
+owner to merge it manually. Re-running after a plugin update is safe: unchanged
+files remain a no-op, while project-local customizations become conflicts
+instead of being overwritten.
 
-This plugin ships the **engine**: the role split (scout/worker/executor — their model pinning and responsibility boundaries), the workflow (the kickoff / dispatch / wrap-up rituals), and one de-projectized, generic `orchestration.md` methodology.
+The materializer does not modify global Codex or Claude configuration, invoke a
+provider, or perform Git writes. This is a repository-local materializer, not a
+native Codex Plugin Directory package. Codex-hosted adversarial review uses the
+target's own `scripts/orchestration_agent.py`,
+`docs/playbook/agent-routing.json`, and
+`examples/schemas/orchestration-result.schema.json`.
 
-It deliberately does **not** ship your project's domain knowledge: the hard rules of any specific codebase, the pitfalls it has hit, the details of its verification battery, its own handoff conventions. Those are things a project grows for itself; baked into a plugin they'd just become stale assumptions that get in the way on the next project.
+## Safety and evidence contract
 
-The entry point for that domain knowledge is `/orchestration:init-playbook`: it generates an empty `docs/playbook/` skeleton in the target project (including the generic `orchestration.md`, a neutral seed of universal engineering lessons as the start of `known-failures.md`, and template files with fields to fill in), which that project then fills in one entry at a time through its own development. The engine installs anywhere; the domain knowledge can only be grown inside its own project.
+Every authorized packet separately carries the authoritative plan SHA,
+release/implementation candidate SHA, target repository HEAD and dirty-state
+evidence, explicit governance identity, host/tier/model identity, allowed and forbidden
+files, acceptance commands, stop conditions, and separate execution, Git, and
+external-provider authorizations. A real CLI call requires
+`ALLOW_PROVIDER_INVOCATION` in both the packet and runner command; reviewer
+authorization is always independent and starts a fresh session.
+
+The canonical schema v3 is one SSOT. Providers receive only its mechanically
+extracted `provider_result`; the runner injects controller-owned immutable
+provenance and records requested/reported model separately. Reviewer findings
+remain candidates until the packet-named adjudicator decides them.
+
+## Capability status
+
+Source and fake-transport tests cover routing schema v2, governance neutrality,
+both host contracts, static three-tier mappings, strict result validation,
+authorization preflight, timeout/Git/manifest handling, and transactional
+no-overwrite distribution.
+
+Established real evidence is narrower: earlier Codex CLI probes preserved JSONL
+events and exercised timeout, process-group termination, partial transcripts,
+and manifests. The Luna/low Codex-host scout formal runner recheck passed in one
+fresh invocation with exit 0, including schema v3, semantic, read-only/mutation,
+and manifest validation.
+
+Real smoke proved that the former native Codex scout sandbox did not enforce
+read-only in the observed embedded runtime, so that default was retired. Real
+rechecks remain pending for native Terra/Sol tasks, both schema-v3 reciprocal
+reviewers, and embedded-versus-standalone Codex runtime version skew. Native
+per-file sandbox enforcement and a native Plugin Directory package are
+unavailable. This project is not a Xinghui Runtime adapter.
 
 ## License
 

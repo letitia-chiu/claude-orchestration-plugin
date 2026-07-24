@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/letitia-chiu/claude-orchestration-plugin/main/examples/schemas/orchestration-result.schema.json",
+  "title": "Canonical orchestration result",
+  "description": "Schema v3 is the single canonical result SSOT. The runner selects one role-specific provider transport definition from this file, validates the substantive result, adds only lossless canonical empty fields for non-reviewer roles, and combines it with controller-owned immutable provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "provenance",
+    "provider_result"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [3]
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "provider_result": {
+      "$ref": "#/$defs/provider_result"
+    }
+  },
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Controller-owned immutable provenance. Providers do not generate, confirm, adjudicate, or modify these fields.",
+      "required": [
+        "governance_identity",
+        "authoritative_plan_sha",
+        "candidate_sha",
+        "target_repository_head",
+        "host_mode",
+        "execution_host",
+        "host_tier",
+        "role",
+        "provider",
+        "profile",
+        "requested_model",
+        "resolved_model",
+        "reported_model",
+        "requested_reasoning_effort",
+        "resolved_reasoning_effort",
+        "reported_reasoning_effort",
+        "invocation_path",
+        "session_id"
+      ],
+      "properties": {
+        "governance_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "governance_authority",
+            "authorization_issuer",
+            "acceptance_owner",
+            "finding_adjudicator",
+            "final_ratifier"
+          ],
+          "properties": {
+            "governance_authority": {
+              "type": "string"
+            },
+            "authorization_issuer": {
+              "type": "string"
+            },
+            "acceptance_owner": {
+              "type": "string"
+            },
+            "finding_adjudicator": {
+              "type": "string"
+            },
+            "final_ratifier": {
+              "type": "string"
+            }
+          }
+        },
+        "authoritative_plan_sha": {
+          "type": "string"
+        },
+        "candidate_sha": {
+          "type": "string"
+        },
+        "target_repository_head": {
+          "type": "string"
+        },
+        "host_mode": {
+          "type": "string",
+          "enum": ["claude_hosted", "codex_hosted"]
+        },
+        "execution_host": {
+          "type": "string"
+        },
+        "host_tier": {
+          "type": ["string", "null"]
+        },
+        "role": {
+          "type": "string",
+          "enum": ["feasibility_verifier", "implementer", "adversarial_reviewer"]
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["codex_cli", "claude_cli"]
+        },
+        "profile": {
+          "type": "string",
+          "enum": ["codex_read_only", "codex_workspace_write", "claude_read_only"]
+        },
+        "requested_model": {
+          "type": "string"
+        },
+        "resolved_model": {
+          "type": "string"
+        },
+        "reported_model": {
+          "type": ["string", "null"]
+        },
+        "requested_reasoning_effort": {
+          "type": ["string", "null"]
+        },
+        "resolved_reasoning_effort": {
+          "type": ["string", "null"]
+        },
+        "reported_reasoning_effort": {
+          "type": ["string", "null"]
+        },
+        "invocation_path": {
+          "type": "string",
+          "enum": ["host_local_cli", "external_cli", "headless_cli"]
+        },
+        "session_id": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "provider_result": {
+      "$ref": "#/$defs/provider_result_adversarial_reviewer"
+    },
+    "test_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "status", "output_digest"],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "skipped"]
+        },
+        "output_digest": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "git_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head_sha", "status_short"],
+      "properties": {
+        "head_sha": {
+          "type": "string"
+        },
+        "status_short": {
+          "type": "string"
+        }
+      }
+    },
+    "repository_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pre", "post"],
+      "properties": {
+        "pre": {
+          "$ref": "#/$defs/git_state"
+        },
+        "post": {
+          "$ref": "#/$defs/git_state"
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "severity",
+        "violated_requirement",
+        "location",
+        "repository_evidence",
+        "impact",
+        "minimal_remediation_scope"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["Blocker", "Major", "Minor"]
+        },
+        "violated_requirement": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "repository_evidence": {
+          "type": "string"
+        },
+        "impact": {
+          "type": "string"
+        },
+        "minimal_remediation_scope": {
+          "type": "string"
+        }
+      }
+    },
+    "provider_result_feasibility_verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Feasibility-only substantive transport. Inventory and feasibility belong in summary and evidence; reviewer collections and changed_files are not exposed.",
+      "required": [
+        "verdict",
+        "summary",
+        "evidence",
+        "stop_reason",
+        "tests",
+        "repository_state"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "PASS_FOR_IMPLEMENTATION_AUTHORIZATION",
+            "PLAN_CHANGE_REQUIRED",
+            "EVIDENCE_INSUFFICIENT"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stop_reason": {
+          "type": ["string", "null"]
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/test_entry"
+          }
+        },
+        "repository_state": {
+          "$ref": "#/$defs/repository_state"
+        }
+      }
+    },
+    "provider_result_implementer": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Implementation-only substantive transport. Reviewer collections are not exposed.",
+      "required": [
+        "verdict",
+        "summary",
+        "evidence",
+        "stop_reason",
+        "changed_files",
+        "tests",
+        "repository_state"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stop_reason": {
+          "type": ["string", "null"]
+        },
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/test_entry"
+          }
+        },
+        "repository_state": {
+          "$ref": "#/$defs/repository_state"
+        }
+      }
+    },
+    "provider_result_adversarial_reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Adversarial-review substantive transport with the complete review surface.",
+      "required": [
+        "verdict",
+        "summary",
+        "evidence",
+        "stop_reason",
+        "changed_files",
+        "tests",
+        "repository_state",
+        "findings",
+        "observations",
+        "suggestions",
+        "evidence_gaps"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stop_reason": {
+          "type": ["string", "null"]
+        },
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/test_entry"
+          }
+        },
+        "repository_state": {
+          "$ref": "#/$defs/repository_state"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suggestions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

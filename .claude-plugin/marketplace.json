@@ -1,6 +1,6 @@
 {
   "name": "orchestration-marketplace",
-  "description": "A cross-project set of slash commands and subagents for an orchestrate-and-delegate workflow: the main session plans, breaks down, and dispatches work; layered subagents (scout / worker / executor) carry it out.",
+  "description": "Governance-neutral dual-host orchestration for Claude and Codex Desktop, with controller-owned provenance, a Codex host-local read-only CLI scout, native implementation tiers, and separately authorized reciprocal CLI review.",
   "owner": {
     "name": "letitia-chiu"
   },
@@ -8,7 +8,7 @@
     {
       "name": "orchestration",
       "source": "./",
-      "description": "A cross-project set of slash commands and subagents for an orchestrate-and-delegate workflow: the main session plans, breaks down, and dispatches work; layered subagents (scout / worker / executor) carry it out."
+      "description": "Governance-neutral dual-host orchestration for Claude and Codex Desktop, with controller-owned provenance, a Codex host-local read-only CLI scout, native implementation tiers, and separately authorized reciprocal CLI review."
     }
   ]
 }

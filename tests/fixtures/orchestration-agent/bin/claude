@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Fake claude CLI for runner tests.
+
+Never contacts a real provider, never reads real provider config, needs no
+network, consumes no quota. Behavior is driven by FAKE_* environment
+variables; received argv can be captured for flag verification. The final
+structured result is embedded in the stream-json stdout as a result event.
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def emit(obj):
+    print(json.dumps(obj), flush=True)
+
+
+def emit_result():
+    payload = os.environ.get("FAKE_FINAL_RESULT")
+    style = os.environ.get("FAKE_RESULT_STYLE", "structured")
+    if style == "missing" or payload is None:
+        return
+    if style == "structured":
+        emit({"type": "result", "structured_output": json.loads(payload)})
+    elif style == "string":
+        emit({"type": "result", "result": payload})
+    elif style == "garbage":
+        emit({"type": "result", "result": "not a json payload {"})
+
+
+def main():
+    argv = sys.argv[1:]
+    if "--version" in argv:
+        print("fake-claude 0.0.1")
+        return 0
+    argv_file = os.environ.get("FAKE_ARGV_FILE")
+    if argv_file:
+        Path(argv_file).write_text(json.dumps(argv), encoding="utf-8")
+    # Real Claude Code 2.1.191 local contract: --print with stream-json output
+    # refuses to start without --verbose. Mirror it so a regression that drops
+    # --verbose from the runner argv fails these tests deterministically.
+    if "-p" in argv and "--output-format" in argv:
+        output_format = argv[argv.index("--output-format") + 1]
+        if output_format == "stream-json" and "--verbose" not in argv:
+            print(
+                "Error: When using --print, --output-format=stream-json requires --verbose",
+                file=sys.stderr,
+            )
+            return 1
+    prompt = "" if sys.stdin.isatty() else sys.stdin.read()
+    stdin_file = os.environ.get("FAKE_STDIN_FILE")
+    if stdin_file:
+        Path(stdin_file).write_text(prompt, encoding="utf-8")
+    stderr_text = os.environ.get("FAKE_STDERR_TEXT")
+    if stderr_text:
+        print(stderr_text, file=sys.stderr, flush=True)
+
+    mode = os.environ.get("FAKE_CLI_MODE", "success")
+    if mode == "success":
+        emit(
+            {
+                "type": "system",
+                "subtype": "init",
+                "session_id": os.environ.get(
+                    "FAKE_SESSION_ID", "00000000-0000-0000-0000-000000000001"
+                ),
+                "model": os.environ.get("FAKE_REPORTED_MODEL", "fake-model-1"),
+            }
+        )
+        emit_result()
+        return 0
+    if mode == "write-file":
+        target = Path(os.environ["FAKE_WRITE_PATH"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("written by fake agent\n", encoding="utf-8")
+        emit(
+            {
+                "type": "system",
+                "subtype": "init",
+                "session_id": os.environ.get(
+                    "FAKE_SESSION_ID", "00000000-0000-0000-0000-000000000001"
+                ),
+                "model": os.environ.get("FAKE_REPORTED_MODEL", "fake-model-1"),
+            }
+        )
+        emit_result()
+        return 0
+    if mode == "nonzero":
+        print("fake failure detail on stderr", file=sys.stderr, flush=True)
+        return int(os.environ.get("FAKE_EXIT_CODE", "3"))
+    if mode in ("timeout", "partial-timeout"):
+        if mode == "partial-timeout":
+            emit({"type": "system", "subtype": "partial before hang"})
+        grandchild = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(300)"]
+        )
+        pid_file = os.environ.get("FAKE_PID_FILE")
+        if pid_file:
+            Path(pid_file).write_text(
+                json.dumps({"self": os.getpid(), "grandchild": grandchild.pid}),
+                encoding="utf-8",
+            )
+        time.sleep(float(os.environ.get("FAKE_SLEEP_SECONDS", "300")))
+        return 0
+    if mode == "delete-transcript":
+        emit({"type": "system", "subtype": "init"})
+        emit_result()
+        target = os.environ.get("FAKE_DELETE_PATH")
+        if target and os.path.exists(target):
+            os.unlink(target)
+        return 0
+    print("unknown FAKE_CLI_MODE: %s" % mode, file=sys.stderr)
+    return 64
+
+
+if __name__ == "__main__":
+    sys.exit(main())

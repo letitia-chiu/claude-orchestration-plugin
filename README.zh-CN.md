@@ -1,87 +1,137 @@
-# orchestration — 面向 Claude Code 的统筹与派工工作流
+# orchestration — Claude 与 Codex 的双 host 编排工作流
 
 [English](README.md) · [繁體中文](README.zh-TW.md) · **简体中文** · [日本語](README.ja.md)
 
-一组跨项目的 slash command 与 subagent，封装了一个简单的想法：**主 session 用的是你最贵的 token，所以它应该只负责思考——规划、拆解任务、验证、交接——而机械性的侦察、实现、繁重工作都交给三个绑定模型的 subagent。** 把它装到任何项目里，你的主 session 就不再干体力活。
+Version: **0.7.0**
 
-> 🌐 **用你的语言工作。** 这些命令与 subagent 是用英文编写的，方便维护，但每一个都会指示 Claude *使用你的语言回应*。用日语聊天，Claude 就会用日语规划、提问、汇报；用简体中文聊天，它就用简体中文回答。把内部机制英文化**不会**让助手变成只懂英文。
+本 repository 提供一份 governance-neutral 编排契约和两个 active-host
+adapter。Claude Desktop／Claude Code 可通过 Claude-native agents 执行工作流；
+Codex Desktop 则使用 Desktop-controlled host-local CLI scout 与 native
+worker／executor。任一 host 都可把冻结后的候选内容
+交给对方 provider 的 CLI，进行 fresh、read-only 对抗式审查。
 
-## 安装
+核心分离如下：
 
-从 plugin marketplace 安装（公开仓库）：
-
+```text
+governance authority
+!= active execution host
+!= host-local scout / worker / executor tier
+!= external adversarial reviewer
 ```
+
+Governance 不固定为 ChatGPT、Claude、Codex 或任何产品。每张 task packet 都必须
+明确 governance authority、authorization issuer、acceptance owner、finding
+adjudicator 和 final ratifier；host、model 或 reviewer 都不能从角色自行推导权力。
+
+## Host modes 与三层同构
+
+| Host mode | Active host | Host-local tiers | External reviewer |
+|---|---|---|---|
+| `claude_hosted` | Claude Desktop／Claude Code | Claude-native `scout` / `worker` / `executor` | Codex CLI / `codex_read_only` |
+| `codex_hosted` | Codex Desktop | scout＝`host_local_cli` Codex CLI／Luna；worker／executor＝native Terra／Sol | Claude CLI / `claude_read_only` |
+
+`scout` 负责只读 inventory 与窄范围 feasibility；`worker` 负责单一 invariant
+或 defect family 的已规格化 implementation；`executor` 负责跨模块或高风险契约
+closure。更高档位不会增加文件、Git、acceptance、adjudication、ratification 或
+governance authority。
+
+Codex-hosted feasibility 固定走单独授权的 Desktop-controlled
+`host_local_cli / codex_cli / codex_read_only / gpt-5.6-luna`；worker／executor
+仍为 native Desktop Terra／Sol。scout 不是 external reviewer 或 fallback。
+Implementer 不得启动 reviewer，也没有 automatic
+reviewer dispatch、retry、fallback、model switching 或 role chaining。
+`headless_cli` implementation 是非默认 opt-in，必须单独授权。
+
+## Claude-hosted 安装
+
+从 Claude plugin marketplace 安装：
+
+```text
 /plugin marketplace add letitia-chiu/claude-orchestration-plugin
 /plugin install orchestration@orchestration-marketplace
 ```
 
-如果想在开发阶段不走 marketplace 流程直接试用：
+开发模式：
 
-```
+```bash
 claude --plugin-dir /path/to/claude-orchestration-plugin
 ```
 
-安装完成后，命令会以 plugin 命名空间的形式出现：`/orchestration:kickoff`、`/orchestration:go`、`/orchestration:dispatch`、`/orchestration:wrapup`、`/orchestration:init-playbook`。
+Claude-hosted 正式 surface 是 namespaced commands：
+`/orchestration:kickoff`、`/orchestration:go`、`/orchestration:dispatch`、
+`/orchestration:wrapup`、`/orchestration:init-playbook`，以及
+`agents/scout.md`、`agents/worker.md`、`agents/executor.md`。
 
-## 三层架构
+Claude model 可通过同名 agent shadowing 做 update-safe 覆盖；优先级是项目
+`.claude/agents/`、用户 `~/.claude/agents/`、plugin，示例在
+`examples/agents/`。Claude-hosted adversarial review 使用单独授权的 fresh
+Codex CLI read-only session。
 
-```
-Orchestrator（主 session — 可用的最强模型 + 高投入）
-│  只做：理解需求、盲区／提问、拆解任务、
-│  派工、对抗性验证、整合、交接。
-│
-├─ scout    = Haiku 4.5   只读侦察（找文件／读代码／汇总
-│                          现状——只返回结论；工具锁定在
-│                          Read/Glob/Grep）
-├─ worker   = Sonnet 5    默认执行（规格明确的实现／测试／
-│                          批量修改／文档）
-└─ executor = Opus 4.8    硬核执行（已完成规格化的大型重构／精细
-                          修改——第一行自报模型 ID，让你
-                          不会误用错的层级）
-```
+## Codex-hosted 安装
 
-五个 slash command 对应工作流的各阶段：
+Plugin checkout 内的文件不会自动出现在其他 repository。请把 Codex-host
+adapter materialize 到明确的 target Git root：
 
-| 命令 | 作用 |
-|---|---|
-| `/orchestration:kickoff` | 开工仪式：盲区排查 → 提问 → 制定计划（包括如何拆分派工）——**停在计划、不开工** |
-| `/orchestration:go` | 开工令：用户下达该命令才开始执行（授权在使用当下才注入，不会被长对话稀释） |
-| `/orchestration:dispatch` | 把任务转成六字段的派工单，发送给正确的层级 |
-| `/orchestration:wrapup` | 收尾仪式：验证清单 → 历史遗留问题检查 → 交接 |
-| `/orchestration:init-playbook` | 在目标项目生成 `docs/playbook/` 骨架（不会覆盖已有文件） |
-
-各层级背后的成本直觉（API 定价比例，订阅制的额度消耗趋势相同）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15。** Orchestrator 花的每一个 token 都是系统里最贵的 token——所以它把单纯的阅读与机械性修改下放，自己只保留判断力。
-
-## 按层级自定义模型（不怕更新覆盖）
-
-各层级出货时钉了默认值：`scout` = `claude-haiku-4-5-20251001`、`worker` = `claude-sonnet-5`、`executor` = `claude-opus-4-8`。这是合理的起点，不是锁死。
-
-想让某一层跑别的模型，**别去改 plugin 的 `agents/*.md`**——plugin 一更新就会被覆盖，你的改动就没了。Claude Code 的 `settings.json` 也没有「per-agent 指定模型」的开关。唯一不怕更新的机制是**同名覆盖（agent shadowing）**：在你自己的 scope 放一个同 `name:` 的子代理，就会整份取代 plugin 版本，而且放在更新永远碰不到的地方。优先级由高到低：项目 `.claude/agents/` → 用户 `~/.claude/agents/` → plugin。
-
-可直接复制的覆盖档放在 [`examples/agents/`](examples/agents/)——挑你要改的层复制过去，只改 `model:` 那一行：
-
-```
-# 全局套用（用户 scope）……
-cp examples/agents/executor.md ~/.claude/agents/executor.md
-# ……或只套用单一项目（项目 scope）
-cp examples/agents/worker.md   .claude/agents/worker.md
-# 接着打开文件，改 `model:` 那一行
+```bash
+python3 scripts/init_codex_host.py \
+  --target /absolute/path/to/target-repository
 ```
 
-两个注意事项，范例档开头的注释也都写了：
+只读检查：
 
-- 覆盖是**整份取代 plugin 的 agent**（连本体一起），所以 plugin 之后对 agent 指令的改进不会流到你的拷贝——要的话请手动同步。
-- `executor` 带了「开工自报模型 ID、不符就停」的指纹探针；改它的 `model:` 时，记得把本体里对应的 model ID 一起改，否则会被自己的检查挡下。
+```bash
+python3 scripts/init_codex_host.py \
+  --target /absolute/path/to/target-repository \
+  --check
+```
 
-若你只是想暂时把**所有层**一次压到同一个模型（非按层级），可用环境变量 `CLAUDE_CODE_SUBAGENT_MODEL` 一次覆盖所有子代理。
+Target 必须是已存在、absolute path 的 Git repository。Materializer 安装恰好
+20 个 repository-local 文件：`AGENTS.md`、两个 native `.codex/agents`
+（worker／executor）、Codex-host
+skill 与 references、shared playbook／routing／schema／task packets，以及
+Claude reviewer runner。
 
-## 引擎，而非领域知识
+安装具有 transactional no-overwrite 语义：missing 文件会复制、identical 文件
+完全不动；任何 existing different file 都使整次操作以零写入失败。已有且不同的
+`AGENTS.md` 必须由 repository owner 手动合并。Plugin 更新后可安全重跑；
+未改文件是 no-op，project-local customization 会形成 conflict，不会被覆盖。
 
-这个 plugin 提供的是**引擎**：角色分工（scout/worker/executor——它们的模型绑定与职责边界）、工作流（kickoff / dispatch / wrap-up 仪式），以及一份去项目化、通用的 `orchestration.md` 方法论。
+Materializer 不修改 global Codex／Claude config、不调用 provider、不做 Git
+write。这是 repository-local materializer，不是 native Codex Plugin Directory
+package。Codex-hosted reviewer 使用 target 内的
+`scripts/orchestration_agent.py`、`docs/playbook/agent-routing.json` 和
+`examples/schemas/orchestration-result.schema.json`。
 
-它刻意**不**提供你项目的领域知识：特定代码库的铁律、它踩过的坑、验证清单的细节、自己的交接惯例。这些是每个项目要自己积累的东西；如果把它们固化进 plugin，换到下一个项目时就只会变成过时的假设、反而碍事。
+## Safety 与 evidence contract
 
-这份领域知识的入口是 `/orchestration:init-playbook`：它会在目标项目生成一份空的 `docs/playbook/` 骨架（包含通用的 `orchestration.md`、作为 `known-failures.md` 起点的一组中性通用工程教训种子，以及待填字段的模板文件），该项目再通过自身的开发过程一条一条填进去。引擎可以安装到任何地方；领域知识则只能在项目自己内部生长。
+每张已授权 packet 都分别包含 authoritative plan SHA、release／implementation
+candidate SHA、target repository HEAD 与 dirty-state evidence、明确的 governance
+identity、host／tier／model、allowed／forbidden files、acceptance
+commands、stop conditions，以及相互分离的 execution、Git、external-provider
+authorization。真实 CLI 调用要求 packet 与 runner command 都携带
+`ALLOW_PROVIDER_INVOCATION`；reviewer authorization 始终独立并启动 fresh session。
+
+Canonical schema v3 是唯一 SSOT。Provider 只收到机械抽取的
+`provider_result`；runner 注入 controller-owned immutable provenance，并分别
+记录 requested／reported model。Reviewer findings 在裁定前都只是 candidate。
+
+## Capability status
+
+Source 与 fake-transport tests 已覆盖 routing schema v2、governance neutrality、
+两个 host contracts、三层 static mappings、strict result validation、
+authorization preflight、timeout／Git／manifest，以及 transactional
+no-overwrite distribution。
+
+已经成立的 real evidence 较窄：先前 Codex CLI probe 已证明 JSONL event 保存，
+并跑过 timeout、process-group termination、partial transcript 与 manifest。Luna／
+low Codex-host scout formal runner recheck 已在一次 fresh invocation 中通过，
+exit 0，且 schema v3、semantic、read-only／mutation 与 manifest validation 均 PASS。
+
+Real smoke 已证明旧 native Codex scout sandbox 在观察到的 embedded runtime
+没有形成 read-only 边界，因此该默认已撤除。仍待 real recheck：native
+Terra／Sol、两边 schema-v3 reciprocal reviewer，以及 embedded／standalone
+Codex runtime version skew。目前没有 native per-file sandbox enforcement，
+也没有 native Plugin Directory package。本项目不是 Xinghui Runtime adapter。
 
 ## 许可证
 

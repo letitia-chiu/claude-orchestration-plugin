@@ -4,27 +4,62 @@
 |---|---|
 | 適用場景 | 統籌窗（使用者開的主 session）的日常運作：拆單、派工、驗收、交班 |
 | 不適用場景 | 產品本身的 runtime 行為；純聊天／一句話問答 |
-| 必讀前置 | `README.md`＋`task-routing.md`（若已填寫） |
-| 不能違反的約束 | 驗收永遠在統籌；規格不清不准派工；同一不變量只准一個實作 owner |
+| 必讀前置 | `README.md`＋`task-routing.md`＋`agent-routing.json`（schema v2：governance-neutral、host-aware、tier-aware） |
+| 不能違反的約束 | governance authority ≠ active host ≠ host-local tier ≠ external reviewer；驗收歸屬 packet 明示的 acceptance owner；規格不清不准派工；同一不變量只准一個實作 owner |
 | 例外處理 | 止血可統籌親手做＋事後補審；同一 defect family 在外部覆核重現兩次＝停止逐點修補，升級方法或 owner |
 | 驗收方式 | 不只看測試全綠：必須同時有 inventory、class closure、adversarial probe、valid-path regression |
 
 ## 架構一張圖
 
 ```text
-統籌（主窗，當下可用的最高智慧模型 + high effort）
-│  只做：理解需求、盲區／提問、抽象化 finding、拆單、派工、對抗式驗收、整合、交班
+Explicit governance authority（每次 packet／流程明示，不固定為任何產品）
+│  authoritative plan / authorization / acceptance / adjudication / final ratification
 │
-├─ scout    ＝Haiku 4.5   唯讀偵察（找檔／讀碼／盤點 surface／彙整現況）
-├─ worker   ＝Sonnet 5    規格明確且邊界獨立的實作／測試／批次修改
-├─ executor ＝Opus 4.8    已規格化但難、跨模組、精密度高的單一-owner 實作
-├─ 外部模型覆核           獨立、只審不改；依風險分級
-└─ 驗證 lens              內部對抗式審查；不取代外部獨立覆核
+└─ selected active host（一次一個：claude_hosted 或 codex_hosted）
+   │
+   ├─ Claude-host adapter（本 plugin；已實作）
+   │   ├─ 統籌（主窗，當下可用的最高智慧模型 + high effort）
+   │   ├─ scout / worker / executor ＝ Claude-native model tiers（既有 agents，模型釘選不變）
+   │   ├─ feasibility_verifier／implementer ＝ active Claude host 自家 tier（Task path）
+   │   └─ adversarial_reviewer ＝ Codex CLI（codex_read_only；獨立授權後經 bounded runner 派）
+   │
+   └─ Codex-host adapter（已實作；需先 materialize 到 target Git repository）
+       ├─ scout ＝ Desktop-controlled host-local Codex CLI read-only（Luna）
+       ├─ worker / executor ＝ Codex-native Desktop tiers（Terra／Sol）
+       ├─ feasibility_verifier＝host_local_cli scout；implementer＝native tier
+       └─ adversarial_reviewer ＝ Claude CLI（claude_read_only）
 ```
 
+- 四層分離：**governance authority ≠ active host ≠ host-local tier ≠ external reviewer**；細節見 `task-routing.md`，SSOT＝`agent-routing.json`（schema v2）。
 - 統籌模型：當下可用的最高智慧模型＋effort high。
-- 成本權重（API 定價比例，訂閱額度同方向）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15**。effort：統籌自選（/effort）；executor/worker＝medium（釘在 agents frontmatter）；scout（Haiku 4.5）不支援 effort 參數＝不設。
-- 執行者一律**開工第一行自報模型 ID**（釘選探針的指紋機制，防「以為派了便宜的、其實跑到貴的」）；高風險外部覆核另驗 model＋effort。
+- Claude-native tier 成本權重（API 定價比例，訂閱額度同方向）：**Haiku : Sonnet : Opus ≈ 1 : 3 : 15**。effort：統籌自選（/effort）；executor/worker＝medium（釘在 agents frontmatter）；scout（Haiku 4.5）不支援 effort 參數＝不設。
+- 執行者一律**開工第一行自報模型 ID**（釘選探針的指紋機制，防「以為派了便宜的、其實跑到貴的」）；外部 CLI provider 另以工單的 Explicit model 欄位釘住；高風險覆核另驗 model＋effort。
+- `codex_workspace_write` headless implementation 保留為明示 opt-in（`headless_cli_implementation`），非任何 host mode 的預設。
+
+## 角色與四層分離
+
+governance identity **不固定、不可路由、由每次 packet 明示**：
+
+```text
+Governance authority
+Authorization issuer
+Acceptance owner
+Finding adjudicator
+Final ratifier
+```
+
+執行角色只有三個：`feasibility_verifier`（唯讀查證；Codex-hosted 以 Desktop 控制的 host-local CLI scout 執行）、`implementer`（單一 batch、native active-host tier）、`adversarial_reviewer`（fresh-context 只審不改，對方 CLI）。host-local scout 不等於 external reviewer。
+
+不可越權的硬邊界：
+
+- implementer 不得 dispatch reviewer；reviewer 不得修 code；reviewer 必須來自 active host 的對方 provider 家族（fail closed）。
+- feasibility 與 implementation 不共用 session；reviewer 永遠 fresh session。
+- 任何 Git 寫入需 packet 明示的 authorization issuer 另行明文授權。
+- reviewer 產出的是 candidate findings；成立與否由 packet 明示的 finding adjudicator 裁定，統籌只做整理與轉呈。
+- tier 較高不代表授權較多：scout／worker／executor 只改能力與成本，不改 Git 或 governance authority。
+- active host 不因負責 implementation 就自動取得 acceptance 或 final-ratification authority。
+
+可逆性：換 host mode 只改 packet 的 `Host mode` 與 host-local model mapping（`model_override`）；shared methodology、packet 與 finding 語意不動。Codex-hosted target 未安裝 adapter、缺檔或有 materializer conflict 時一律 fail closed。
 
 ## 統籌七律
 
@@ -46,14 +81,14 @@
 
 命令／agent 腳本英文化，只是「給模型讀的指令」用英文，不是你的輸出語言。長 session 尤其容易漂成英文——這是明確失敗模式，收尾回報時務必自檢。
 
-## 派誰
+## 派誰（先選 role，再由 agent-routing.json 解析 provider）
 
-| 任務長相 | 派 | 附加規則 |
+| 任務長相 | role（→ 預設 provider/profile） | 附加規則 |
 |---|---|---|
-| 現況／檔案／surface 盤點 | scout | 唯讀；回傳結論＋證據，不貼大段原文 |
-| 規格明確、邊界獨立的實作 | worker | 不得與其他 agent 共用同一 invariant owner |
-| 已規格化但難、跨模組契約、精密重構 | executor | production＋共用 validator＋inventory＋boundary tests 同一 context |
-| 高風險第二雙眼 | 外部模型 | fresh context、只審不改、凍結候選集合；覆核模型依風險分級（平衡型日常／旗艦關卡／輕量低風險；專案有委派範本則照其格式）；外部模型不可用＝lens 加倍（rubric 有明文） |
+| 現況／檔案／surface 盤點 | scout（active host 自家快速唯讀檔位；Claude-hosted＝Haiku tier） | 唯讀；回傳結論＋證據，不貼大段原文 |
+| 對 authoritative plan 的 repository-local 可行性查證 | feasibility_verifier（Claude-hosted＝native；Codex-hosted＝Desktop-controlled `host_local_cli / codex_read_only / Luna`） | 唯讀、fresh session；verdict 只有三種；host-local CLI scout 不是 external reviewer |
+| 規格明確、已授權的實作 batch | implementer（→ active_host_local_tier；Claude-hosted＝worker（邊界獨立；不得與其他 agent 共用同一 invariant owner）／executor（跨模組、精密；production＋共用 validator＋inventory＋boundary tests 同一 context）） | 限授權 worktree＋allowed files；工單用 active-host-implementation packet；headless_cli_implementation（codex_workspace_write）為非預設 opt-in，工單用 headless-codex-implementation packet＋獨立授權 |
+| 高風險第二雙眼 | adversarial_reviewer（→ 對方 CLI：claude_hosted＝codex_cli / codex_read_only；codex_hosted＝claude_cli / claude_read_only） | fresh context、只審不改、凍結候選集合；需獨立 reviewer authorization；工單用 codex-adversarial-review／claude-adversarial-review packet；覆核模型依風險分級且由 packet 明示；finding 成立由 packet 明示的 finding adjudicator 裁定；外部 reviewer 不可用＝lens 加倍（rubric 有明文） |
 | 判斷／語氣／審美／小事 | 統籌自己 | 派工成本高於自做 |
 
 ## finding 泛化規則

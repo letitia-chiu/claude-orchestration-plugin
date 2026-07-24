@@ -1,0 +1,109 @@
+# Task Packet — Codex-Hosted Gate
+
+> Formal C2 packet for one Codex Desktop host-local feasibility or native
+> implementation Gate. Replace every `<...>` value from the current control
+> window. Packet completeness is not authorization.
+
+## Common header（C2 identity fields required）
+
+| Field | Value |
+|---|---|
+| Governance authority | `<explicit governance authority identity>` |
+| Authorization issuer | `<issuer for this exact Gate>` |
+| Acceptance owner | `<acceptance owner>` |
+| Finding adjudicator | `<candidate-finding adjudicator>` |
+| Final ratifier | `<final ratifier>` |
+| Host mode | `codex_hosted` |
+| Active execution host | `codex_desktop` |
+| Host-local tier | `<scout, worker, or executor>` |
+| Host-local model | `<gpt-5.6-luna, gpt-5.6-terra, or gpt-5.6-sol matching the selected tier, unless an explicit project-local override is authorized>` |
+| Host-local reasoning effort | scout: `low`; worker: `medium`; executor: `high`（scout 的 CLI 值固定為 `low`，不得使用 UI 名稱 `Light`） |
+| Invocation path | scout: `host_local_cli`; worker/executor: `active_host` |
+| External reviewer provider/profile/model | `not applicable` — the implementer cannot dispatch a reviewer; review needs a new packet and authorization |
+| Role | `<feasibility_verifier or implementer>` |
+| Provider/profile | scout: `codex_cli / codex_read_only`; worker/executor: `codex_native / <worker or executor>` |
+| Explicit model | `<exact model ID>` |
+| Repository/worktree | `<absolute authorized worktree path>` |
+| Authoritative plan branch | `<plan branch>` |
+| Authoritative plan commit SHA | `<exact plan SHA>` |
+| Release／implementation candidate SHA | `<exact plugin/release candidate SHA>` |
+| Canonical base SHA | `<exact canonical base SHA>` |
+| Target repository HEAD | `<exact target pre-Gate HEAD>` |
+| Target repository status／dirty-state evidence | `<CLEAN，或 controller 對 exact git status --short --untracked-files=all UTF-8 bytes 產生的 sha256:<digest>>` |
+| Goal | `<one Gate, one observable outcome>` |
+| Allowed files | `<exhaustive repo-relative paths; every unlisted path is forbidden>` |
+| Forbidden files | `<explicit forbidden paths>`; fixed addition: every path not in Allowed files |
+| Required evidence | `<pre/post Git, changed files, tier/thread/model identity, commands, tests, expected results>` |
+| Stop conditions | `<Gate-specific stops>`; fixed: identity mismatch, missing authorization, unavailable model, forbidden-file need, plan/repository conflict, or ambiguous specification |
+| Git authorization | `<NONE by default, or one exact separately authorized Git action; commit never implies push/PR/merge>` |
+| Host-local execution authorization | scout: `ALLOW_HOST_LOCAL_CLI_INVOCATION`; worker/executor: `NONE` |
+| External-side-effect authorization | `NONE` — active-host work cannot invoke Claude CLI or another provider |
+| Report schema | schema v3 `examples/schemas/orchestration-result.schema.json`; runner依role選擇transport，provider/agent只回傳該role的substantive fields |
+
+## Fixed contract
+
+- Governance authority, active host, host-local tier, and external reviewer are
+  independent identities.
+- Read the authoritative plan at the exact SHA and verify the exact worktree,
+  branch, HEAD, and clean status before work.
+- `scout` is Desktop-controlled host-local read-only CLI inventory/feasibility;
+  the retired native scout sandbox is not a safety boundary. `worker` owns one specified
+  invariant or defect family. `executor` owns authorized cross-module or
+  high-risk closure. A higher model tier grants no additional authority.
+- Work only in Allowed files, honor Forbidden files, run only the named
+  acceptance commands, and stop at every listed condition.
+- Execution authorization and Git authorization are separate. `NONE` forbids
+  commit, push, pull request, merge, amend, rebase, tag, branch, and worktree
+  writes.
+- Conversation memory and previous sessions are not authorization.
+- Codex Desktop explicitly calls the runner only for the exact host-local scout
+  tuple:
+  `host_local_cli / codex_cli / codex_read_only / gpt-5.6-luna /
+  reasoning_effort=low`. Packet, routing, and runner CLI must agree; missing or
+  different effort fails before spawn. Worker/executor never use the runner.
+  The PATH Codex CLI is not the active host.
+- Scout reports repository inventory and feasibility only through `summary` and
+  `evidence`; its transport does not expose `changed_files`, `findings`,
+  `observations`, `suggestions`, or `evidence_gaps`. Runner validates that
+  narrow surface before adding canonical empty collections.
+- Worker/executor implementation transport includes `changed_files` but does
+  not expose reviewer-only collections. Illegal role fields are rejected, not
+  ignored, converted, or reclassified.
+- The implementer cannot dispatch a reviewer. Claude CLI review requires a
+  fresh `adversarial_reviewer` packet, independent authorization, and
+  `ALLOW_PROVIDER_INVOCATION` in both packet and runner CLI.
+- Never automatically retry, fall back, switch models, resume, or chain roles.
+- Report active-host evidence with external runner session/manifest recorded as
+  `not applicable`.
+- All next-step authorization defaults to NO after this Gate.
+
+## Required wrap-up
+
+Record the governance and plan identities, Codex Desktop host thread UUID,
+native child thread/task UUID, selected tier, configured/requested/resolved
+model and reasoning effort plus actual provider metadata when available,
+pre/post Git evidence, exact changed files, test commands/results, Git actions,
+unsupported capabilities, and evidence gaps.
+
+Do not infer corrective recheck success from static configuration. Luna CLI
+scout, Terra/Sol native execution, schema-v3 reciprocal reviewers, and runtime
+version-skew behavior remain pending separate authorization.
+
+## Provider substantive task（scout only）
+
+For a scout Gate, replace the placeholder instructions inside these exact
+markers with the bounded repository-local inventory/feasibility task. The
+controller validates and preserves the complete packet, while the runner sends
+Luna only this section plus its fixed `substantive_only` preamble. Do not place
+controller identities or authorization labels inside the markers.
+
+<!-- BEGIN PROVIDER SUBSTANTIVE TASK -->
+Inspect the named target-repository files in read-only mode. Report the
+task-scoped inventory and feasibility only through `summary` and `evidence`.
+Perform the authorized write probe only to confirm rejection, then continue.
+
+Do not implement, perform adversarial review, inspect a closed Gate, dispatch
+another role/provider, or return reviewer collections. Return only the selected
+`feasibility_verifier` provider result and use one of its three schema-permitted
+verdicts.
+<!-- END PROVIDER SUBSTANTIVE TASK -->
