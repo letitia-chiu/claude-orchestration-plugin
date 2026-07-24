@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/letitia-chiu/claude-orchestration-plugin/main/examples/schemas/orchestration-result.schema.json",
   "title": "Canonical orchestration result",
-  "description": "Schema v3 is the single canonical result SSOT. The runner supplies immutable provenance from the validated packet, invocation, Git evidence, and provider event metadata. The provider receives only the mechanically extracted $defs.provider_result schema and returns substantive work or review content. The runner validates that content, combines provenance plus provider_result, writes final-result.json, and manifests the bundle.",
+  "description": "Schema v3 is the single canonical result SSOT. The runner selects one role-specific provider transport definition from this file, validates the substantive result, adds only lossless canonical empty fields for non-reviewer roles, and combines it with controller-owned immutable provenance.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -119,9 +119,177 @@
       }
     },
     "provider_result": {
+      "$ref": "#/$defs/provider_result_adversarial_reviewer"
+    },
+    "test_entry": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The only schema sent to a provider. It contains substantive result fields and no controller-owned provenance.",
+      "required": ["command", "status", "output_digest"],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "skipped"]
+        },
+        "output_digest": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "git_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head_sha", "status_short"],
+      "properties": {
+        "head_sha": {
+          "type": "string"
+        },
+        "status_short": {
+          "type": "string"
+        }
+      }
+    },
+    "repository_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pre", "post"],
+      "properties": {
+        "pre": {
+          "$ref": "#/$defs/git_state"
+        },
+        "post": {
+          "$ref": "#/$defs/git_state"
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "severity",
+        "violated_requirement",
+        "location",
+        "repository_evidence",
+        "impact",
+        "minimal_remediation_scope"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["Blocker", "Major", "Minor"]
+        },
+        "violated_requirement": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "repository_evidence": {
+          "type": "string"
+        },
+        "impact": {
+          "type": "string"
+        },
+        "minimal_remediation_scope": {
+          "type": "string"
+        }
+      }
+    },
+    "provider_result_feasibility_verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Feasibility-only substantive transport. Inventory and feasibility belong in summary and evidence; reviewer collections and changed_files are not exposed.",
+      "required": [
+        "verdict",
+        "summary",
+        "evidence",
+        "stop_reason",
+        "tests",
+        "repository_state"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stop_reason": {
+          "type": ["string", "null"]
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/test_entry"
+          }
+        },
+        "repository_state": {
+          "$ref": "#/$defs/repository_state"
+        }
+      }
+    },
+    "provider_result_implementer": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Implementation-only substantive transport. Reviewer collections are not exposed.",
+      "required": [
+        "verdict",
+        "summary",
+        "evidence",
+        "stop_reason",
+        "changed_files",
+        "tests",
+        "repository_state"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stop_reason": {
+          "type": ["string", "null"]
+        },
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/test_entry"
+          }
+        },
+        "repository_state": {
+          "$ref": "#/$defs/repository_state"
+        }
+      }
+    },
+    "provider_result_adversarial_reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Adversarial-review substantive transport with the complete review surface.",
       "required": [
         "verdict",
         "summary",
@@ -160,94 +328,16 @@
         "tests": {
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["command", "status", "output_digest"],
-            "properties": {
-              "command": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": ["passed", "failed", "skipped"]
-              },
-              "output_digest": {
-                "type": ["string", "null"]
-              }
-            }
+            "$ref": "#/$defs/test_entry"
           }
         },
         "repository_state": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["pre", "post"],
-          "properties": {
-            "pre": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["head_sha", "status_short"],
-              "properties": {
-                "head_sha": {
-                  "type": "string"
-                },
-                "status_short": {
-                  "type": "string"
-                }
-              }
-            },
-            "post": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["head_sha", "status_short"],
-              "properties": {
-                "head_sha": {
-                  "type": "string"
-                },
-                "status_short": {
-                  "type": "string"
-                }
-              }
-            }
-          }
+          "$ref": "#/$defs/repository_state"
         },
         "findings": {
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "id",
-              "severity",
-              "violated_requirement",
-              "location",
-              "repository_evidence",
-              "impact",
-              "minimal_remediation_scope"
-            ],
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "severity": {
-                "type": "string",
-                "enum": ["Blocker", "Major", "Minor"]
-              },
-              "violated_requirement": {
-                "type": "string"
-              },
-              "location": {
-                "type": "string"
-              },
-              "repository_evidence": {
-                "type": "string"
-              },
-              "impact": {
-                "type": "string"
-              },
-              "minimal_remediation_scope": {
-                "type": "string"
-              }
-            }
+            "$ref": "#/$defs/finding"
           }
         },
         "observations": {

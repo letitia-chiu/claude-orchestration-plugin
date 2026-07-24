@@ -47,11 +47,13 @@ release.
 Invoke the reviewer from the target repository root with the target-installed
 `scripts/orchestration_agent.py` and
 `docs/playbook/agent-routing.json`. The runner mechanically extracts
-`$defs.provider_result` from the target-local
+the role-specific reviewer transport from the target-local canonical
 `examples/schemas/orchestration-result.schema.json`; the provider never
-receives or echoes controller-owned provenance. The runner creates canonical
-`provenance + provider_result` output. No plugin-checkout path is part of the
-invocation.
+receives or echoes controller-owned provenance. Feasibility and implementation
+select their own narrower definitions from that same SSOT. The runner rejects
+fields outside the selected role before lossless empty-field normalization and
+then creates canonical `provenance + provider_result` output. No
+plugin-checkout path is part of the invocation.
 
 ## Prohibited routing
 

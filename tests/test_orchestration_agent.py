@@ -137,19 +137,23 @@ def make_result(
         "summary": "fake run summary",
         "evidence": ["src/app.py:1 fake evidence"],
         "stop_reason": None,
-        "changed_files": [],
         "tests": [],
         "repository_state": {
             "pre": {"head_sha": "0" * 40, "status_short": ""},
             "post": {"head_sha": "0" * 40, "status_short": ""},
         },
-        # Fixed envelope: every role sends all four reviewer collections;
-        # non-reviewer roles must leave them empty.
-        "findings": [],
-        "observations": [],
-        "suggestions": [],
-        "evidence_gaps": [],
     }
+    if role in ("implementer", "adversarial_reviewer"):
+        result["changed_files"] = []
+    if role == "adversarial_reviewer":
+        result.update(
+            {
+                "findings": [],
+                "observations": [],
+                "suggestions": [],
+                "evidence_gaps": [],
+            }
+        )
     result.update(overrides)
     return result
 
@@ -1128,7 +1132,7 @@ class StructuredOutputTests(RunnerTestCase):
         self.assert_outcome(artifact_dir, "TRANSCRIPT_INCOMPLETE")
 
     def test_provider_cannot_supply_role_provenance(self):
-        final = make_result("implementer", "codex_cli", "codex_read_only")
+        final = make_result("adversarial_reviewer", "codex_cli", "codex_read_only")
         final["role"] = "implementer"
         rc, artifacts, _, _ = self.run_runner(
             "adversarial_reviewer",
@@ -1227,11 +1231,14 @@ class StructuredOutputTests(RunnerTestCase):
             "codex_read_only",
             invocation_path="external_cli",
         )
+        canonical_good = oa.normalize_provider_result(
+            good, "feasibility_verifier"
+        )
         self.assertEqual(
-            oa.validate_result(good, "feasibility_verifier"),
+            oa.validate_result(canonical_good, "feasibility_verifier"),
             [],
         )
-        bad = dict(good, verdict="LOOKS_FINE")
+        bad = dict(canonical_good, verdict="LOOKS_FINE")
         errors = oa.validate_result(bad, "feasibility_verifier")
         self.assertTrue(any("feasibility verdict" in e for e in errors))
 
@@ -1480,14 +1487,14 @@ class SchemaPreflightTests(RunnerTestCase):
 
     def test_missing_nested_additional_properties_fails_closed(self):
         def mutate(schema):
-            schema["$defs"]["provider_result"]["properties"]["findings"][
-                "items"
-            ].pop("additionalProperties")
+            schema["$defs"]["finding"].pop("additionalProperties")
         self.run_with_schema(mutate)
 
     def test_incomplete_required_fails_closed(self):
         def mutate(schema):
-            schema["$defs"]["provider_result"]["required"].remove("verdict")
+            schema["$defs"]["provider_result_adversarial_reviewer"][
+                "required"
+            ].remove("verdict")
 
         self.run_with_schema(mutate)
 
@@ -1507,18 +1514,19 @@ class SchemaPreflightTests(RunnerTestCase):
         self.run_with_schema(mutate)
 
 
-class FixedEnvelopeTests(RunnerTestCase):
-    """RC-1: every role emits the same envelope; semantics stay in the runner."""
+class RoleSpecificEnvelopeTests(RunnerTestCase):
+    """C3: providers see role surfaces; canonical results stay uniform."""
 
-    def test_non_reviewer_missing_collections_is_invalid_output(self):
+    def test_implementer_missing_reviewer_collections_is_normalized(self):
         final = make_result("implementer", "codex_cli", "codex_workspace_write")
-        del final["findings"]
         rc, artifacts, _, _ = self.run_runner(
             "implementer", allowed=("src/app.py",), final=final
         )
-        self.assertEqual(rc, 1)
-        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
-        self.assertIn("findings", invocation["detail"])
+        self.assertEqual(rc, 0)
+        self.assert_outcome(artifacts, "SUCCESS")
+        canonical = json.loads((artifacts / "final-result.json").read_text())
+        for field in oa.REVIEWER_COLLECTIONS:
+            self.assertEqual(canonical["provider_result"][field], [])
 
     def test_non_reviewer_nonempty_collections_is_invalid_output(self):
         final = make_result(
@@ -2032,6 +2040,176 @@ class CorrectiveC2ContractTests(RunnerTestCase):
         self.assertEqual(
             final["provenance"]["reported_model"], "claude-sonnet-4-6"
         )
+
+
+class CorrectiveC3RoleSchemaTests(RunnerTestCase):
+    """C3: select narrow role transports and normalize canonical empties."""
+
+    SCHEMA = json.loads(
+        (PLUGIN_ROOT / "examples" / "schemas" / "orchestration-result.schema.json")
+        .read_text(encoding="utf-8")
+    )
+
+    def scout_kwargs(self, final=None):
+        return {
+            "host_mode": "codex_hosted",
+            "invocation_path": "host_local_cli",
+            "host_tier": "scout",
+            "model": "gpt-5.6-luna",
+            "packet_text": PACKET_HOST_LOCAL_ALLOW,
+            "flag_auth": None,
+            "host_local_auth": "ALLOW_HOST_LOCAL_CLI_INVOCATION",
+            "final": final
+            if final is not None
+            else make_result(
+                "feasibility_verifier", "codex_cli", "codex_read_only"
+            ),
+        }
+
+    def test_single_schema_ssot_contains_three_role_definitions(self):
+        schema_files = list(
+            (PLUGIN_ROOT / "examples" / "schemas").glob(
+                "orchestration-result*.schema.json"
+            )
+        )
+        self.assertEqual(schema_files, [
+            PLUGIN_ROOT / "examples" / "schemas" / "orchestration-result.schema.json"
+        ])
+        self.assertEqual(self.SCHEMA["properties"]["schema_version"]["enum"], [3])
+        for definition in oa.PROVIDER_TRANSPORT_DEFINITION_BY_ROLE.values():
+            self.assertIn(definition, self.SCHEMA["$defs"])
+
+    def test_runner_selects_transport_definition_only_from_role(self):
+        expected = {
+            "feasibility_verifier": {
+                "verdict",
+                "summary",
+                "evidence",
+                "stop_reason",
+                "tests",
+                "repository_state",
+            },
+            "implementer": {
+                "verdict",
+                "summary",
+                "evidence",
+                "stop_reason",
+                "changed_files",
+                "tests",
+                "repository_state",
+            },
+            "adversarial_reviewer": set(oa.PROVIDER_RESULT_REQUIRED),
+        }
+        for role, fields in expected.items():
+            schema = oa.extract_provider_result_schema(self.SCHEMA, role)
+            self.assertEqual(set(schema["properties"]), fields, role)
+            self.assertEqual(oa.preflight_strict_schema(schema), [], role)
+
+    def test_unknown_role_fails_closed_and_cli_has_no_schema_selector(self):
+        with self.assertRaises(oa.ConfigError):
+            oa.extract_provider_result_schema(self.SCHEMA, "caller_selected_role")
+        source = RUNNER_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("--provider-schema", source)
+        self.assertNotIn("--schema-definition", source)
+
+    def test_feasibility_transport_exposes_no_review_collections(self):
+        schema = oa.extract_provider_result_schema(
+            self.SCHEMA, "feasibility_verifier"
+        )
+        for field in (*oa.REVIEWER_COLLECTIONS, "changed_files"):
+            self.assertNotIn(field, schema["properties"])
+        self.assertNotIn("finding", schema["$defs"])
+
+    def test_implementer_transport_exposes_no_review_collections(self):
+        schema = oa.extract_provider_result_schema(self.SCHEMA, "implementer")
+        self.assertIn("changed_files", schema["properties"])
+        for field in oa.REVIEWER_COLLECTIONS:
+            self.assertNotIn(field, schema["properties"])
+        self.assertNotIn("finding", schema["$defs"])
+
+    def test_reviewer_transport_keeps_complete_review_surface(self):
+        schema = oa.extract_provider_result_schema(
+            self.SCHEMA, "adversarial_reviewer"
+        )
+        self.assertEqual(set(schema["properties"]), set(oa.PROVIDER_RESULT_REQUIRED))
+        for field in oa.REVIEWER_COLLECTIONS:
+            self.assertIn(field, schema["properties"])
+        self.assertIn("finding", schema["$defs"])
+
+    def test_luna_style_feasibility_result_succeeds_and_normalizes(self):
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier", **self.scout_kwargs()
+        )
+        self.assertEqual(rc, 0)
+        self.assert_outcome(artifacts, "SUCCESS")
+        raw = json.loads((artifacts / "provider-result.json").read_text())
+        self.assertNotIn("changed_files", raw)
+        for field in oa.REVIEWER_COLLECTIONS:
+            self.assertNotIn(field, raw)
+        canonical = json.loads((artifacts / "final-result.json").read_text())[
+            "provider_result"
+        ]
+        self.assertEqual(canonical["changed_files"], [])
+        for field in oa.REVIEWER_COLLECTIONS:
+            self.assertEqual(canonical[field], [])
+
+    def test_feasibility_findings_are_rejected_not_reclassified(self):
+        final = make_result(
+            "feasibility_verifier",
+            "codex_cli",
+            "codex_read_only",
+            findings=[],
+        )
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier", **self.scout_kwargs(final)
+        )
+        self.assertEqual(rc, 1)
+        detail = self.assert_outcome(artifacts, "INVALID_OUTPUT")["detail"]
+        self.assertIn("outside the selected role schema: findings", detail)
+        self.assertFalse((artifacts / "final-result.json").exists())
+
+    def test_feasibility_unknown_extra_field_is_rejected(self):
+        final = make_result(
+            "feasibility_verifier",
+            "codex_cli",
+            "codex_read_only",
+            invented_review="do not ignore me",
+        )
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier", **self.scout_kwargs(final)
+        )
+        self.assertEqual(rc, 1)
+        detail = self.assert_outcome(artifacts, "INVALID_OUTPUT")["detail"]
+        self.assertIn("invented_review", detail)
+
+    def test_reviewer_collections_are_preserved_without_rewrite(self):
+        finding = {
+            "id": "F-C3",
+            "severity": "Major",
+            "violated_requirement": "review requirement",
+            "location": "src/app.py:1",
+            "repository_evidence": "src/app.py:1 evidence",
+            "impact": "observable impact",
+            "minimal_remediation_scope": "one function",
+        }
+        final = make_result(
+            "adversarial_reviewer",
+            "codex_cli",
+            "codex_read_only",
+            findings=[finding],
+            observations=["observation"],
+            suggestions=["suggestion"],
+            evidence_gaps=["gap"],
+        )
+        rc, artifacts, _, _ = self.run_runner(
+            "adversarial_reviewer", final=final
+        )
+        self.assertEqual(rc, 0)
+        canonical = json.loads((artifacts / "final-result.json").read_text())[
+            "provider_result"
+        ]
+        for field in oa.REVIEWER_COLLECTIONS:
+            self.assertEqual(canonical[field], final[field])
 
 
 class ClaudeInvocationContractTests(RunnerTestCase):

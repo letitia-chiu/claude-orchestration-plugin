@@ -37,7 +37,7 @@
 | Git authorization | `<NONE by default, or one exact separately authorized Git action; commit never implies push/PR/merge>` |
 | Host-local execution authorization | scout: `ALLOW_HOST_LOCAL_CLI_INVOCATION`; worker/executor: `NONE` |
 | External-side-effect authorization | `NONE` — active-host work cannot invoke Claude CLI or another provider |
-| Report schema | schema v3 `examples/schemas/orchestration-result.schema.json`; provider/agent returns substantive result only |
+| Report schema | schema v3 `examples/schemas/orchestration-result.schema.json`; runner依role選擇transport，provider/agent只回傳該role的substantive fields |
 
 ## Fixed contract
 
@@ -57,6 +57,13 @@
 - Conversation memory and previous sessions are not authorization.
 - Codex Desktop explicitly calls the runner only for the exact host-local scout
   tuple. Worker/executor never use it. The PATH Codex CLI is not the active host.
+- Scout reports repository inventory and feasibility only through `summary` and
+  `evidence`; its transport does not expose `changed_files`, `findings`,
+  `observations`, `suggestions`, or `evidence_gaps`. Runner validates that
+  narrow surface before adding canonical empty collections.
+- Worker/executor implementation transport includes `changed_files` but does
+  not expose reviewer-only collections. Illegal role fields are rejected, not
+  ignored, converted, or reclassified.
 - The implementer cannot dispatch a reviewer. Claude CLI review requires a
   fresh `adversarial_reviewer` packet, independent authorization, and
   `ALLOW_PROVIDER_INVOCATION` in both packet and runner CLI.

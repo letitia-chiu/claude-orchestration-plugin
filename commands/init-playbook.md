@@ -543,6 +543,19 @@ reviewer 契約：fresh session；read-only；不屬於 active host 的 tier cha
 | `implementer` | `active_host_local_tier` | 由 active host 以自家 worker／executor 於指定 worktree 做單一授權 batch；只碰 allowed files；遇 forbidden-file dependency 或規格矛盾＝停止；不得 dispatch reviewer；未經另行授權不得 commit／push／PR／merge |
 | `adversarial_reviewer` | `external_reviewer` | 獨立 reviewer authorization 後，經 bounded runner 派對方 CLI；fresh session、唯讀；findings 為 candidate，由 packet 明示的 finding adjudicator 裁定 |
 
+Provider transport由canonical schema中的role-specific definition機械選擇：
+
+- `feasibility_verifier`只取得`verdict`、`summary`、`evidence`、
+  `stop_reason`、`tests`、`repository_state`；inventory與可行性只透過
+  `summary/evidence`回報，不存在review collections或`changed_files`。
+- `implementer`另取得`changed_files`，但同樣看不到review collections。
+- `adversarial_reviewer`保留完整`findings`、`observations`、
+  `suggestions`、`evidence_gaps`surface。
+
+Runner先拒絕selected role以外的任何欄位；不得忽略、轉換或重新分類。
+Transport validation與semantic validation均成功後，才為非reviewer canonical
+result補入明確的空collections（feasibility另補`changed_files: []`）。
+
 ## Invocation paths
 
 | invocation_path | 語意 | 誰可用 |
@@ -635,10 +648,12 @@ Report schema
 ```
 
 回報對照唯一 canonical `examples/schemas/orchestration-result.schema.json`
-（schema v3）。runner 機械抽取 `$defs.provider_result` 給 provider，再注入
-immutable provenance。requested_model 與 CLI metadata 的 reported_model 分開
-保存；alias 展開本身不是 INVALID_OUTPUT。plan SHA、candidate SHA、target HEAD
-與 target dirty-state evidence 不得互相代替。
+（schema v3）。runner依解析後的role機械選擇同檔
+`$defs.provider_result_<role>`給provider；caller沒有schema selector。Runner
+驗證role surface、執行無資訊損失的canonical空值正規化，再注入immutable
+provenance。requested_model與CLI metadata的reported_model分開保存；alias
+展開本身不是INVALID_OUTPUT。plan SHA、candidate SHA、target HEAD與target
+dirty-state evidence不得互相代替。
 Status evidence 使用 `CLEAN`，或由 controller 對 exact
 `git status --short --untracked-files=all` UTF-8 bytes 計算的
 `sha256:<digest>`；runner 會以 target 的實際狀態重算並比對。

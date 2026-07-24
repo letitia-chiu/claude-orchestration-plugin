@@ -286,10 +286,15 @@ class SharedContractParityTests(unittest.TestCase):
         ):
             self.assertIn(field, schema["$defs"]["provenance"]["required"])
         self.assertEqual(schema["properties"]["schema_version"]["enum"], [3])
-        self.assertNotIn(
-            "governance_identity",
-            schema["$defs"]["provider_result"]["properties"],
-        )
+        for definition in (
+            "provider_result_feasibility_verifier",
+            "provider_result_implementer",
+            "provider_result_adversarial_reviewer",
+        ):
+            self.assertNotIn(
+                "governance_identity",
+                schema["$defs"][definition]["properties"],
+            )
 
     def test_claude_agent_models_and_responsibilities_are_distinct(self):
         agents = [

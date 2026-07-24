@@ -36,7 +36,9 @@ Only after independent review authorization, record separately:
 - adjudication status for each candidate finding.
 
 The canonical final artifact records controller-owned immutable provenance
-separately from the provider's substantive result. Never ask the reviewer to
+separately from the provider's substantive result. The runner selects the
+role-specific provider transport, rejects illegal role fields, and only then
+adds canonical empty collections for non-reviewers. Never ask the reviewer to
 confirm or endorse provenance.
 
 The reviewer does not close findings by assertion and cannot become the

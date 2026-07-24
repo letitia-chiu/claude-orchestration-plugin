@@ -127,9 +127,10 @@ External-side-effect authorization = ALLOW_PROVIDER_INVOCATION
 
 The controller has already supplied immutable provenance. The reviewer produces
 only the substantive `provider_result`; it does not infer, modify, confirm, or
-adjudicate authority metadata. The runner mechanically extracts the provider
-schema from the canonical schema-v3 SSOT, records requested/reported model
-separately, and writes `provenance + provider_result`.
+adjudicate authority metadata. The runner mechanically selects the
+`adversarial_reviewer` provider definition from the canonical schema-v3 SSOT,
+records requested/reported model separately, and writes
+`provenance + provider_result`.
 
 The runner starts at most one fresh Claude CLI process. The reviewer cannot
 modify the repository, repair findings, dispatch a host or another role, or
@@ -143,16 +144,21 @@ Desktop implementation report has no external runner manifest; record
 
 ## Pending real evidence
 
-The failed smoke established the native scout sandbox defect. After this
-corrective contract, the following real rechecks remain pending:
+The C2 targeted recheck preserved these established results: host-local Luna
+read-only enforcement and zero Git delta, native Terra/Sol success, and
+schema-v3 Claude/Codex reviewer success. Luna's substantive result alone failed
+because the then-common transport exposed reviewer collections to a feasibility
+role and the model populated them.
 
-- real Luna CLI scout;
-- real Terra worker and Sol executor native tasks;
-- schema-v3 Claude and Codex reviewers;
-- embedded Codex Desktop and standalone CLI runtime parity;
-- requested/reported model and session metadata across version skew.
+The canonical schema now contains separate feasibility, implementation, and
+reviewer transport definitions. Feasibility inventory is expressed only through
+`summary` and `evidence`; reviewer fields are rejected rather than ignored or
+converted.
 
-Treat this as pending runtime version-skew behavior evidence, not binary parity.
+- real Luna CLI scout: one independently authorized confirmation remains pending.
+- real Terra worker and Sol executor native tasks: preserved PASS evidence; no C3 rerun is required.
+- schema-v3 Claude and Codex reviewers: preserved PASS evidence; no C3 rerun is required.
+- runtime version-skew behavior: remains an explicit compatibility caveat.
 
-Do not claim these capabilities have passed until the later smoke artifacts
-exist.
+Treat embedded/standalone version skew as behavioral evidence, not binary
+parity, and do not claim final ratification from static tests.

@@ -24,9 +24,10 @@ This runner is a narrow process-safety wrapper. Per invocation it:
 - records pre/post Git evidence with read-only Git commands only;
 - detects repository mutation for read-only roles;
 - validates implementation changed paths against allow/forbid lists;
-- sends only the provider_result subschema to the provider, validates the
-  substantive result, and combines it with controller-owned immutable
-  provenance in the canonical schema-v3 final artifact;
+- selects and sends only the role-specific provider_result definition from the
+  canonical schema, validates the substantive result, applies lossless
+  canonical empty-field normalization, and combines it with controller-owned
+  immutable provenance in the schema-v3 final artifact;
 - writes an artifact bundle plus a SHA-256 manifest;
 - returns a machine-readable classified outcome.
 
@@ -41,6 +42,7 @@ Standard library only.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -138,6 +140,42 @@ PROVIDER_RESULT_REQUIRED = (
     "evidence_gaps",
 )
 REVIEWER_COLLECTIONS = ("findings", "observations", "suggestions", "evidence_gaps")
+CONTROLLER_OWNED_RESULT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "provenance",
+        "governance_identity",
+        "authoritative_plan_sha",
+        "candidate_sha",
+        "target_repository_head",
+        "host_mode",
+        "execution_host",
+        "host_tier",
+        "role",
+        "provider",
+        "profile",
+        "requested_model",
+        "reported_model",
+        "model",
+        "invocation_path",
+        "session_id",
+    }
+)
+PROVIDER_TRANSPORT_DEFINITION_BY_ROLE = {
+    "feasibility_verifier": "provider_result_feasibility_verifier",
+    "implementer": "provider_result_implementer",
+    "adversarial_reviewer": "provider_result_adversarial_reviewer",
+}
+PROVIDER_TRANSPORT_DEPENDENCIES_BY_ROLE = {
+    "feasibility_verifier": ("test_entry", "repository_state", "git_state"),
+    "implementer": ("test_entry", "repository_state", "git_state"),
+    "adversarial_reviewer": (
+        "test_entry",
+        "repository_state",
+        "git_state",
+        "finding",
+    ),
+}
 
 # Keywords the strict structured-output transport does not reliably support.
 # The canonical schema must stay inside the strict subset; the local preflight
@@ -627,17 +665,81 @@ def resolve_tier_model(routing, host_mode, tier):
 # ---------------------------------------------------------------------------
 
 
-def extract_provider_result_schema(canonical_schema):
-    """Mechanically extract the sole provider transport schema from the SSOT."""
+def extract_provider_result_schema(canonical_schema, role):
+    """Mechanically select one role transport from the canonical schema SSOT."""
+    definition_name = PROVIDER_TRANSPORT_DEFINITION_BY_ROLE.get(role)
+    if definition_name is None:
+        raise ConfigError("unsupported provider-result role: %r" % role)
     try:
-        provider_schema = canonical_schema["$defs"]["provider_result"]
+        canonical_defs = canonical_schema["$defs"]
+        provider_schema = copy.deepcopy(canonical_defs[definition_name])
     except (KeyError, TypeError) as exc:
         raise ConfigError(
-            "canonical schema does not define $defs.provider_result"
+            "canonical schema does not define $defs.%s" % definition_name
         ) from exc
     if not isinstance(provider_schema, dict):
-        raise ConfigError("$defs.provider_result must be an object schema")
+        raise ConfigError("$defs.%s must be an object schema" % definition_name)
+    if "$defs" in provider_schema:
+        raise ConfigError("$defs.%s must not contain a nested $defs" % definition_name)
+    dependencies = {}
+    for dependency_name in PROVIDER_TRANSPORT_DEPENDENCIES_BY_ROLE[role]:
+        dependency = canonical_defs.get(dependency_name)
+        if not isinstance(dependency, dict):
+            raise ConfigError(
+                "canonical schema does not define object $defs.%s" % dependency_name
+            )
+        dependencies[dependency_name] = copy.deepcopy(dependency)
+    provider_schema["$defs"] = dependencies
     return provider_schema
+
+
+def validate_provider_transport_result(result, provider_schema):
+    """Validate the exact selected transport surface before normalization."""
+    if not isinstance(result, dict):
+        return ["provider result is not a JSON object"]
+    properties = provider_schema.get("properties")
+    required = provider_schema.get("required")
+    if not isinstance(properties, dict) or not isinstance(required, list):
+        return ["selected provider transport schema is malformed"]
+    expected = set(properties)
+    errors = []
+    missing = sorted(set(required) - set(result))
+    if missing:
+        errors.append("provider transport missing required fields: %s" % ", ".join(missing))
+    extra = sorted(set(result) - expected)
+    controller_owned = sorted(set(extra).intersection(CONTROLLER_OWNED_RESULT_FIELDS))
+    if controller_owned:
+        errors.append(
+            "provider transport contains controller-owned fields: %s"
+            % ", ".join(controller_owned)
+        )
+    other_extra = sorted(set(extra) - set(controller_owned))
+    if other_extra:
+        errors.append(
+            "provider transport contains fields outside the selected role schema: %s"
+            % ", ".join(other_extra)
+        )
+    return errors
+
+
+def normalize_provider_result(result, role):
+    """Add only lossless canonical empty fields after transport validation."""
+    if role not in PROVIDER_TRANSPORT_DEFINITION_BY_ROLE:
+        raise ConfigError("unsupported provider-result role: %r" % role)
+    normalized = copy.deepcopy(result)
+    defaults = {}
+    if role == "feasibility_verifier":
+        defaults["changed_files"] = []
+    if role != "adversarial_reviewer":
+        defaults.update({field: [] for field in REVIEWER_COLLECTIONS})
+    illegal = sorted(set(normalized).intersection(defaults))
+    if illegal:
+        raise ConfigError(
+            "provider supplied canonical-only fields before normalization: %s"
+            % ", ".join(illegal)
+        )
+    normalized.update(defaults)
+    return normalized
 
 
 def build_provider_command(
@@ -1178,16 +1280,6 @@ def cmd_run(args):
             raise ConfigError(
                 "schema strict-subset preflight failed: " + "; ".join(schema_errors)
             )
-        provider_schema = extract_provider_result_schema(schema_doc)
-        provider_schema_errors = preflight_strict_schema(provider_schema)
-        if provider_schema_errors:
-            raise ConfigError(
-                "provider_result schema strict-subset preflight failed: "
-                + "; ".join(provider_schema_errors)
-            )
-        provider_schema_file = artifact_dir / "provider-result.schema.json"
-        _write_json(provider_schema_file, provider_schema)
-
         # Governance identity is packet-supplied and mandatory (fail closed).
         missing_identity = sorted(
             field
@@ -1434,6 +1526,20 @@ def cmd_run(args):
                 )
             invocation["external_side_effect_authorization"] = packet_auth
 
+        # The parsed role mechanically selects its provider transport
+        # definition from the one canonical schema. The caller has no schema
+        # selector, and every selected transport is strict-preflighted before
+        # a provider process may start.
+        provider_schema = extract_provider_result_schema(schema_doc, args.role)
+        provider_schema_errors = preflight_strict_schema(provider_schema)
+        if provider_schema_errors:
+            raise ConfigError(
+                "provider_result schema strict-subset preflight failed: "
+                + "; ".join(provider_schema_errors)
+            )
+        provider_schema_file = artifact_dir / "provider-result.schema.json"
+        _write_json(provider_schema_file, provider_schema)
+
         # Copy controller inputs into the bundle.
         shutil.copyfile(task_file, artifact_dir / "task.md")
         shutil.copyfile(args.routing_file, artifact_dir / "routing.json")
@@ -1588,7 +1694,17 @@ def cmd_run(args):
         )
     if result is None:
         return finish(INVALID_OUTPUT, result_error or "final structured result missing")
-    validation_errors = validate_result(result, args.role)
+    transport_errors = validate_provider_transport_result(result, provider_schema)
+    if transport_errors:
+        return finish(
+            INVALID_OUTPUT,
+            "provider transport validation failed: " + "; ".join(transport_errors),
+        )
+    try:
+        normalized_result = normalize_provider_result(result, args.role)
+    except ConfigError as exc:
+        return finish(INVALID_OUTPUT, "provider normalization failed: %s" % exc)
+    validation_errors = validate_result(normalized_result, args.role)
     if validation_errors:
         return finish(INVALID_OUTPUT, "result validation failed: " + "; ".join(validation_errors))
     provenance = {
@@ -1610,15 +1726,18 @@ def cmd_run(args):
     canonical_result = {
         "schema_version": 3,
         "provenance": provenance,
-        "provider_result": result,
+        "provider_result": normalized_result,
     }
     _write_json(artifact_dir / "final-result.json", canonical_result)
-    outcome = map_verdict_outcome(result)
+    outcome = map_verdict_outcome(normalized_result)
     if outcome == MODEL_REPORTED_BLOCKER:
-        return finish(MODEL_REPORTED_BLOCKER, "model reported a blocker: %r" % result["stop_reason"])
+        return finish(
+            MODEL_REPORTED_BLOCKER,
+            "model reported a blocker: %r" % normalized_result["stop_reason"],
+        )
     if outcome == STOPPED:
-        return finish(STOPPED, "model stopped: %r" % result["stop_reason"])
-    return finish(SUCCESS, "verdict=%s" % result["verdict"])
+        return finish(STOPPED, "model stopped: %r" % normalized_result["stop_reason"])
+    return finish(SUCCESS, "verdict=%s" % normalized_result["verdict"])
 
 
 def cmd_verify_manifest(args):

@@ -36,7 +36,7 @@
 | Git authorization | NONE（不得 branch、worktree、commit、push、PR、merge） |
 | Host-local execution authorization | Codex-hosted scout 必須為 `ALLOW_HOST_LOCAL_CLI_INVOCATION`；其他情況 `NONE` |
 | External-side-effect authorization | NONE（不得對外寫入、不得 dispatch 任何 provider 或角色） |
-| Report schema | `examples/schemas/orchestration-result.schema.json`（schema v3；provider 只產生 provider_result） |
+| Report schema | `examples/schemas/orchestration-result.schema.json`（schema v3；runner依`feasibility_verifier`機械選擇role-specific provider transport） |
 
 ## 固定行為契約（不可覆寫）
 
@@ -50,6 +50,10 @@
 - 缺少規格＝停止並回報缺什麼，不猜測、不發明替代方案。
 - controller 已提供 immutable provenance；provider 不得推論、修改、確認或
   裁定 authority／host／invocation metadata。
+- Report feasibility and repository inventory through `summary` and
+  `evidence`. Do not produce review `findings`, `observations`, `suggestions`,
+  or `evidence_gaps`. Those collections are not part of the feasibility
+  transport schema.
 - verdict 只能是下列三者之一：
 
 ```text
@@ -60,9 +64,13 @@ EVIDENCE_INSUFFICIENT
 
 ## 回報要求
 
-- 只產出 `provider_result` substantive fields；runner 組合 immutable
-  provenance 並寫入 canonical final result。
-- `changed_files` 必須為空；`repository_state.pre/post` 必須零 delta。
-- `evidence` 逐項對應 Required evidence 清單；查不到的列入回報而非省略。
+- Provider只產出feasibility transport的`verdict`、`summary`、`evidence`、
+  `stop_reason`、`tests`與`repository_state`。Runner驗證成功後才為canonical
+  result補入`changed_files: []`與四個空review collections，再組合immutable
+  provenance。
+- `repository_state.pre/post`必須零delta。
+- `evidence`逐項對應Required evidence清單；無法取得的證據在`summary`與
+  `evidence`中明示，必要時使用`EVIDENCE_INSUFFICIENT`，不得改用review
+  collections。
 - active host 執行沒有 external runner manifest＝明確記 `not applicable`，不得虛構。
 - 回報後停止，等待 packet 明示的 authorization issuer 決定下一步。
