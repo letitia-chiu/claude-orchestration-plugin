@@ -82,6 +82,14 @@ local tier execution mechanism; the PATH Codex CLI is not the active host, a
 reviewer, or a fallback.
 Worker/executor use distinct native Desktop child tasks.
 
+The controller validates and archives the complete packet before spawn. For the
+scout path, the provider receives only the single marker-delimited `PROVIDER
+SUBSTANTIVE TASK` section plus a fixed `substantive_only` preamble.
+Plan/candidate/governance identities and authorization fields remain
+controller-only. The target-local skill treats kickoff/go as controller phases
+and tells the provider not to test whether those external identities exist in
+the target repository.
+
 Real smoke showed that `.codex/agents/scout.toml` with
 `sandbox_mode = read-only` did not enforce a read-only boundary in the observed
 embedded runtime; the file and misleading default were retired.
@@ -146,14 +154,19 @@ Desktop implementation report has no external runner manifest; record
 
 The C2 targeted recheck preserved these established results: host-local Luna
 read-only enforcement and zero Git delta, native Terra/Sol success, and
-schema-v3 Claude/Codex reviewer success. Luna's substantive result alone failed
-because the then-common transport exposed reviewer collections to a feasibility
-role and the model populated them.
+schema-v3 Claude/Codex reviewer success. The first Luna substantive result
+failed because the then-common transport exposed reviewer collections to a
+feasibility role. After role-specific transport and Luna/low pinning, a later
+formal run passed model/effort, read-only, mutation, manifest, and transport
+checks but repeated controller-only identity checks in the disposable target
+and returned unsupported `BLOCKED`.
 
 The canonical schema now contains separate feasibility, implementation, and
 reviewer transport definitions. Feasibility inventory is expressed only through
 `summary` and `evidence`; reviewer fields are rejected rather than ignored or
-converted.
+converted. The controller now keeps the complete packet out of Luna's stdin,
+sends only the delimited substantive task, and constrains feasibility verdicts
+to the three semantic values directly in the transport schema.
 
 - real Luna CLI scout: one independently authorized confirmation remains pending.
 - real Terra worker and Sol executor native tasks: preserved PASS evidence; no C3 rerun is required.

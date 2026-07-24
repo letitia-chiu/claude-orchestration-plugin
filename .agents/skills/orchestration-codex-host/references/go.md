@@ -3,6 +3,12 @@
 `go` is a fail-closed validation step. It validates authorization; it does not
 create or broaden it.
 
+This gate is executed only by the controller before provider spawn. A
+runner-dispatched provider in `substantive_only` mode must not repeat these
+checks, run `git cat-file`/`git show-ref` for plan or candidate identities, or
+turn the absence of external controller objects in the target repository into
+a provider verdict.
+
 ## Exact identity checks
 
 Before work, verify and record:

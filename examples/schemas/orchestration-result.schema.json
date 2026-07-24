@@ -231,7 +231,12 @@
       ],
       "properties": {
         "verdict": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "PASS_FOR_IMPLEMENTATION_AUTHORIZATION",
+            "PLAN_CHANGE_REQUIRED",
+            "EVIDENCE_INSUFFICIENT"
+          ]
         },
         "summary": {
           "type": "string"

@@ -88,3 +88,22 @@ unsupported capabilities, and evidence gaps.
 Do not infer corrective recheck success from static configuration. Luna CLI
 scout, Terra/Sol native execution, schema-v3 reciprocal reviewers, and runtime
 version-skew behavior remain pending separate authorization.
+
+## Provider substantive task（scout only）
+
+For a scout Gate, replace the placeholder instructions inside these exact
+markers with the bounded repository-local inventory/feasibility task. The
+controller validates and preserves the complete packet, while the runner sends
+Luna only this section plus its fixed `substantive_only` preamble. Do not place
+controller identities or authorization labels inside the markers.
+
+<!-- BEGIN PROVIDER SUBSTANTIVE TASK -->
+Inspect the named target-repository files in read-only mode. Report the
+task-scoped inventory and feasibility only through `summary` and `evidence`.
+Perform the authorized write probe only to confirm rejection, then continue.
+
+Do not implement, perform adversarial review, inspect a closed Gate, dispatch
+another role/provider, or return reviewer collections. Return only the selected
+`feasibility_verifier` provider result and use one of its three schema-permitted
+verdicts.
+<!-- END PROVIDER SUBSTANTIVE TASK -->

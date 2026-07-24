@@ -24,6 +24,15 @@ passes `-c model_reasoning_effort=low`, ignores user config for that child, and
 fails before spawn if packet, routing, or caller differs. `Light` is a UI label,
 not the CLI value. No global default may silently upgrade scout effort.
 
+Before spawning the scout, the runner validates the complete controller packet
+and saves it as `task.md`. It then extracts exactly one section delimited by
+`BEGIN/END PROVIDER SUBSTANTIVE TASK`, prepends the
+`substantive_only` phase contract, saves that prompt as `provider-task.md`, and
+sends only that file to Luna. Missing, duplicate, empty, reversed, or
+controller-identity-bearing sections fail before spawn. The provider therefore
+cannot be tasked with revalidating plan/candidate/governance identity while the
+full packet remains available for audit.
+
 Worker/executor use distinct Codex Desktop child tasks; preserve thread UUID and
 actual model identity. The PATH Codex CLI is not the active host.
 

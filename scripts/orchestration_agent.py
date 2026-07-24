@@ -19,6 +19,8 @@ This runner is a narrow process-safety wrapper. Per invocation it:
   --external-authorization flag; missing, unknown, ambiguous, or mismatched
   authorization fails closed with no child process started;
 - starts exactly one external CLI process (codex_cli or claude_cli);
+- for the Codex-hosted scout, preserves the complete controller packet as
+  evidence but sends the provider only a marker-delimited substantive task;
 - enforces a wall-clock timeout against the whole child process group;
 - captures stdout and stderr separately, unmerged;
 - records pre/post Git evidence with read-only Git commands only;
@@ -116,6 +118,50 @@ EXTERNAL_AUTH_FIELD = "External-side-effect authorization"
 ALLOW_PROVIDER_INVOCATION = "ALLOW_PROVIDER_INVOCATION"
 HOST_LOCAL_AUTH_FIELD = "Host-local execution authorization"
 ALLOW_HOST_LOCAL_CLI_INVOCATION = "ALLOW_HOST_LOCAL_CLI_INVOCATION"
+PROVIDER_TASK_START = "<!-- BEGIN PROVIDER SUBSTANTIVE TASK -->"
+PROVIDER_TASK_END = "<!-- END PROVIDER SUBSTANTIVE TASK -->"
+PROVIDER_TASK_PROTECTED_LABELS = (
+    "Governance authority",
+    "Authorization issuer",
+    "Acceptance owner",
+    "Finding adjudicator",
+    "Final ratifier",
+    "Authoritative plan",
+    "candidate SHA",
+    "Target repository HEAD",
+    "Target repository status",
+    "Host mode",
+    "Active execution host",
+    "Host-local tier",
+    "Host-local model",
+    "Host-local reasoning effort",
+    "Invocation path",
+    "Provider/profile",
+    "Explicit model",
+    "Repository/worktree",
+    "Canonical base SHA",
+    "Git authorization",
+    "Host-local execution authorization",
+    "External-side-effect authorization",
+)
+FEASIBILITY_PROVIDER_PREAMBLE = """\
+# Runner-dispatched feasibility provider task
+
+Provider execution phase: `substantive_only`.
+
+The controller has already validated immutable provenance, repository identity,
+routing, authorization, model, reasoning effort, and the pre-run Git snapshot.
+Do not repeat, confirm, infer, or adjudicate those controller checks. In
+particular, do not use `git cat-file`, `git show-ref`, or another command to test
+whether plan, candidate, governance, or authorization identities exist in the
+target repository.
+
+Execute only the substantive task below. Return only the fields required by the
+selected `feasibility_verifier` provider schema. The only permitted verdicts are
+`PASS_FOR_IMPLEMENTATION_AUTHORIZATION`, `PLAN_CHANGE_REQUIRED`, and
+`EVIDENCE_INSUFFICIENT`.
+
+"""
 
 # External CLI profile -> (provider kind, write-capable)
 PROFILES = {
@@ -715,6 +761,44 @@ def extract_provider_result_schema(canonical_schema, role):
     return provider_schema
 
 
+def extract_provider_substantive_task(packet_text, role, invocation_path):
+    """Return a provider-only prompt for the corrective host-local scout.
+
+    The complete packet remains the controller's evidence and authorization
+    input. The provider receives only the one explicitly delimited substantive
+    section, so it cannot be asked to repeat controller-owned provenance checks.
+    Other established runner paths retain their existing prompt contract.
+    """
+    if role != "feasibility_verifier" or invocation_path != "host_local_cli":
+        return packet_text, "full_packet"
+    if packet_text.count(PROVIDER_TASK_START) != 1:
+        raise ConfigError(
+            "host-local feasibility packet must contain exactly one provider "
+            "substantive task start marker"
+        )
+    if packet_text.count(PROVIDER_TASK_END) != 1:
+        raise ConfigError(
+            "host-local feasibility packet must contain exactly one provider "
+            "substantive task end marker"
+        )
+    start = packet_text.index(PROVIDER_TASK_START) + len(PROVIDER_TASK_START)
+    end = packet_text.index(PROVIDER_TASK_END)
+    if end <= start:
+        raise ConfigError("provider substantive task markers are out of order")
+    substantive = packet_text[start:end].strip()
+    if not substantive:
+        raise ConfigError("provider substantive task must not be empty")
+    protected = [
+        label for label in PROVIDER_TASK_PROTECTED_LABELS if label.lower() in substantive.lower()
+    ]
+    if protected:
+        raise ConfigError(
+            "provider substantive task contains controller-only packet labels: "
+            + ", ".join(protected)
+        )
+    return FEASIBILITY_PROVIDER_PREAMBLE + substantive + "\n", "substantive_only"
+
+
 def validate_provider_transport_result(result, provider_schema):
     """Validate the exact selected transport surface before normalization."""
     if not isinstance(result, dict):
@@ -740,6 +824,16 @@ def validate_provider_transport_result(result, provider_schema):
         errors.append(
             "provider transport contains fields outside the selected role schema: %s"
             % ", ".join(other_extra)
+        )
+    verdict_schema = properties.get("verdict")
+    if (
+        isinstance(verdict_schema, dict)
+        and isinstance(verdict_schema.get("enum"), list)
+        and result.get("verdict") not in verdict_schema["enum"]
+    ):
+        errors.append(
+            "provider transport verdict must be one of %s"
+            % sorted(verdict_schema["enum"])
         )
     return errors
 
@@ -1290,6 +1384,8 @@ def cmd_run(args):
         "outcome": None,
         "detail": None,
         "argv": None,
+        "provider_task_mode": None,
+        "provider_task_sha256": None,
     }
     artifact_dir = Path(args.artifact_dir)
 
@@ -1630,9 +1726,21 @@ def cmd_run(args):
         provider_schema_file = artifact_dir / "provider-result.schema.json"
         _write_json(provider_schema_file, provider_schema)
 
-        # Copy controller inputs into the bundle.
+        # Preserve the complete controller packet, but expose only the
+        # marker-delimited substantive section to the corrective host-local
+        # scout. This prevents the provider from repeating or adjudicating
+        # controller-owned identity and authorization checks.
         shutil.copyfile(task_file, artifact_dir / "task.md")
         shutil.copyfile(args.routing_file, artifact_dir / "routing.json")
+        provider_task, provider_task_mode = extract_provider_substantive_task(
+            packet_text, args.role, args.invocation_path
+        )
+        provider_task_path = artifact_dir / "provider-task.md"
+        provider_task_path.write_text(provider_task, encoding="utf-8")
+        invocation["provider_task_mode"] = provider_task_mode
+        invocation["provider_task_sha256"] = hashlib.sha256(
+            provider_task.encode("utf-8")
+        ).hexdigest()
 
         pre_state = _snapshot_git(workdir)
         _write_json(artifact_dir / "pre-git.json", pre_state)
@@ -1687,7 +1795,7 @@ def cmd_run(args):
     interrupted = False
     invocation["started_at"] = _utc_now()
     start_clock = time.monotonic()
-    with open(task_file, "rb") as stdin_fh, open(stdout_path, "wb") as stdout_fh, open(
+    with open(provider_task_path, "rb") as stdin_fh, open(stdout_path, "wb") as stdout_fh, open(
         stderr_path, "wb"
     ) as stderr_fh:
         try:

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -98,6 +99,11 @@ PACKET_HOST_LOCAL_ALLOW = (
     "External-side-effect authorization: NONE\n"
     "Host-local execution authorization: ALLOW_HOST_LOCAL_CLI_INVOCATION\n"
     "Host-local reasoning effort: low\n"
+    + oa.PROVIDER_TASK_START
+    + "\nInspect src/app.py in read-only mode and report feasibility through "
+    "summary and evidence. Do not implement or review.\n"
+    + oa.PROVIDER_TASK_END
+    + "\n"
 )
 
 # Default invocation path per role for test convenience (each test may override).
@@ -2234,6 +2240,133 @@ class ScoutLowEffortCorrectiveTests(RunnerTestCase):
                 "reported_reasoning_effort",
             }.issubset(required)
         )
+
+
+class ScoutProviderPromptSeparationTests(RunnerTestCase):
+    """Controller packet stays auditable; Luna receives substantive task only."""
+
+    def scout_kwargs(self, packet=PACKET_HOST_LOCAL_ALLOW, final=None):
+        return {
+            "host_mode": "codex_hosted",
+            "invocation_path": "host_local_cli",
+            "host_tier": "scout",
+            "model": "gpt-5.6-luna",
+            "reasoning_effort": "low",
+            "packet_text": packet,
+            "flag_auth": None,
+            "host_local_auth": "ALLOW_HOST_LOCAL_CLI_INVOCATION",
+            "final": final
+            if final is not None
+            else make_result(
+                "feasibility_verifier", "codex_cli", "codex_read_only"
+            ),
+        }
+
+    def assert_pre_spawn_failure(self, packet):
+        argv_file = self.tmp / ("not-spawned-" + uuid.uuid4().hex + ".json")
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier",
+            extra_env={"FAKE_ARGV_FILE": str(argv_file)},
+            **self.scout_kwargs(packet),
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertFalse(argv_file.exists(), invocation["detail"])
+        return invocation
+
+    def test_luna_receives_only_substantive_task_and_packet_is_preserved(self):
+        stdin_capture = self.tmp / "captured-scout-stdin.md"
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier",
+            extra_env={"FAKE_STDIN_FILE": str(stdin_capture)},
+            **self.scout_kwargs(),
+        )
+        self.assertEqual(rc, 0)
+        provider_prompt = stdin_capture.read_text(encoding="utf-8")
+        self.assertEqual(
+            provider_prompt,
+            (artifacts / "provider-task.md").read_text(encoding="utf-8"),
+        )
+        self.assertIn("Provider execution phase: `substantive_only`", provider_prompt)
+        self.assertIn("Inspect src/app.py", provider_prompt)
+        for controller_only in (
+            "Authoritative plan commit SHA",
+            "Release/implementation candidate SHA",
+            "Target repository HEAD",
+            "Governance authority",
+            "ALLOW_HOST_LOCAL_CLI_INVOCATION",
+        ):
+            self.assertNotIn(controller_only, provider_prompt)
+        complete_packet = (artifacts / "task.md").read_text(encoding="utf-8")
+        self.assertIn("Authoritative plan commit SHA", complete_packet)
+        self.assertIn("Release/implementation candidate SHA", complete_packet)
+        self.assertIn("Target repository HEAD", complete_packet)
+        self.assertIn("ALLOW_HOST_LOCAL_CLI_INVOCATION", complete_packet)
+        invocation = self.assert_outcome(artifacts, "SUCCESS")
+        self.assertEqual(invocation["provider_task_mode"], "substantive_only")
+        self.assertEqual(
+            invocation["provider_task_sha256"],
+            hashlib.sha256(provider_prompt.encode("utf-8")).hexdigest(),
+        )
+
+    def test_missing_substantive_task_markers_fail_before_spawn(self):
+        packet = PACKET_HOST_LOCAL_ALLOW.replace(oa.PROVIDER_TASK_START, "")
+        invocation = self.assert_pre_spawn_failure(packet)
+        self.assertIn("exactly one provider substantive task start", invocation["detail"])
+
+    def test_duplicate_substantive_task_marker_fails_before_spawn(self):
+        packet = PACKET_HOST_LOCAL_ALLOW.replace(
+            oa.PROVIDER_TASK_START,
+            oa.PROVIDER_TASK_START + "\n" + oa.PROVIDER_TASK_START,
+        )
+        invocation = self.assert_pre_spawn_failure(packet)
+        self.assertIn("exactly one provider substantive task start", invocation["detail"])
+
+    def test_reversed_substantive_task_markers_fail_before_spawn(self):
+        packet = PACKET_HOST_LOCAL_ALLOW.replace(
+            oa.PROVIDER_TASK_START, "<!-- TEMP MARKER -->"
+        ).replace(oa.PROVIDER_TASK_END, oa.PROVIDER_TASK_START).replace(
+            "<!-- TEMP MARKER -->", oa.PROVIDER_TASK_END
+        )
+        invocation = self.assert_pre_spawn_failure(packet)
+        self.assertIn("out of order", invocation["detail"])
+
+    def test_controller_identity_inside_substantive_task_fails_before_spawn(self):
+        packet = PACKET_HOST_LOCAL_ALLOW.replace(
+            "Inspect src/app.py",
+            "Governance authority: do not repeat. Inspect src/app.py",
+        )
+        invocation = self.assert_pre_spawn_failure(packet)
+        self.assertIn("controller-only packet labels", invocation["detail"])
+        self.assertIn("Governance authority", invocation["detail"])
+
+    def test_feasibility_transport_schema_constrains_verdict_enum(self):
+        schema = json.loads(
+            (PLUGIN_ROOT / "examples" / "schemas" / "orchestration-result.schema.json")
+            .read_text(encoding="utf-8")
+        )
+        transport = oa.extract_provider_result_schema(
+            schema, "feasibility_verifier"
+        )
+        self.assertEqual(
+            set(transport["properties"]["verdict"]["enum"]),
+            set(oa.FEASIBILITY_VERDICTS),
+        )
+
+    def test_blocked_verdict_is_rejected_by_transport_validation(self):
+        final = make_result(
+            "feasibility_verifier",
+            "codex_cli",
+            "codex_read_only",
+            verdict="BLOCKED",
+        )
+        rc, artifacts, _, _ = self.run_runner(
+            "feasibility_verifier", **self.scout_kwargs(final=final)
+        )
+        self.assertEqual(rc, 1)
+        invocation = self.assert_outcome(artifacts, "INVALID_OUTPUT")
+        self.assertIn("provider transport verdict", invocation["detail"])
+        self.assertFalse((artifacts / "final-result.json").exists())
 
 
 class CorrectiveC3RoleSchemaTests(RunnerTestCase):

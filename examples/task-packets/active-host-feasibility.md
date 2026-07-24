@@ -74,3 +74,26 @@ EVIDENCE_INSUFFICIENT
   collections。
 - active host 執行沒有 external runner manifest＝明確記 `not applicable`，不得虛構。
 - 回報後停止，等待 packet 明示的 authorization issuer 決定下一步。
+
+## Provider substantive task（Codex-hosted scout必填）
+
+Controller保留並驗證上方完整packet。Codex-hosted `host_local_cli` scout只會
+收到下列marker之間的內容；marker缺失、重複、順序錯誤、內容為空，或內容
+夾帶controller-only identity label時，runner必須在spawn前停止。
+
+<!-- BEGIN PROVIDER SUBSTANTIVE TASK -->
+Inspect the target repository in read-only mode.
+
+Report the requested repository inventory and feasibility through `summary` and
+`evidence`. Inspect only the task-scoped files and contracts named by the
+controller. Attempt the explicitly requested write probe only to demonstrate
+that the read-only sandbox rejects it, then continue the assessment.
+
+Do not implement, review, dispatch another role, inspect a closed Gate, or
+produce reviewer collections. Return only the substantive
+`feasibility_verifier` result. Its verdict must be exactly one of:
+
+- `PASS_FOR_IMPLEMENTATION_AUTHORIZATION`
+- `PLAN_CHANGE_REQUIRED`
+- `EVIDENCE_INSUFFICIENT`
+<!-- END PROVIDER SUBSTANTIVE TASK -->

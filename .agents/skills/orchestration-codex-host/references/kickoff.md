@@ -3,6 +3,11 @@
 Kickoff turns the controlling request and authoritative plan into a complete,
 inspectable packet. It does not authorize execution.
 
+This is a **controller-only** phase. A runner-dispatched provider whose prompt
+states `Provider execution phase: substantive_only` must not repeat kickoff,
+read controller-only identities from the packet, or validate them in the target
+repository.
+
 ## Required inputs
 
 Read the authoritative plan at the exact supplied branch and commit identity.

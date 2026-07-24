@@ -21,6 +21,9 @@ REFERENCES = ("kickoff.md", "go.md", "dispatch.md", "wrapup.md")
 CODEX_DOC = ROOT / "docs" / "playbook" / "codex-host.md"
 ROUTING_FILE = ROOT / "docs" / "playbook" / "agent-routing.json"
 PACKET_FILE = ROOT / "examples" / "task-packets" / "codex-host-gate.md"
+FEASIBILITY_PACKET_FILE = (
+    ROOT / "examples" / "task-packets" / "active-host-feasibility.md"
+)
 RUNNER_FILE = ROOT / "scripts" / "orchestration_agent.py"
 
 TIERS = ("scout", "worker", "executor")
@@ -202,6 +205,24 @@ class SkillContractTests(unittest.TestCase):
             self.assertTrue(path.is_file(), path)
             self.assertIn("references/%s" % name, skill_text)
 
+    def test_skill_separates_controller_and_provider_execution_phases(self):
+        text = read(SKILL_FILE)
+        self.assertIn("Controller mode", text)
+        self.assertIn("Runner-dispatched provider mode", text)
+        self.assertIn("Provider execution phase: substantive_only", text)
+        self.assertIn("do not execute the controller references", text)
+        self.assertIn("do not\n  inspect whether plan/candidate/governance", text)
+
+    def test_controller_references_cannot_be_replayed_by_provider(self):
+        kickoff = read(SKILL_DIR / "references" / "kickoff.md")
+        go = read(SKILL_DIR / "references" / "go.md")
+        dispatch = read(SKILL_DIR / "references" / "dispatch.md")
+        self.assertIn("controller-only", kickoff)
+        self.assertIn("executed only by the controller", go)
+        self.assertIn("git cat-file", go)
+        self.assertIn("provider-task.md", dispatch)
+        self.assertIn("full packet remains available for audit", dispatch)
+
     def test_kickoff_collects_plan_governance_host_and_authorization(self):
         text = read(SKILL_DIR / "references" / "kickoff.md")
         for marker in (
@@ -359,6 +380,15 @@ class PacketAndDocumentationTests(unittest.TestCase):
             "ALLOW_PROVIDER_INVOCATION",
         ):
             self.assertIn(marker, text)
+
+    def test_formal_scout_packets_have_one_substantive_task_section(self):
+        for path in (PACKET_FILE, FEASIBILITY_PACKET_FILE):
+            text = read(path)
+            start = "<!-- BEGIN PROVIDER SUBSTANTIVE TASK -->"
+            end = "<!-- END PROVIDER SUBSTANTIVE TASK -->"
+            self.assertEqual(text.count(start), 1, path)
+            self.assertEqual(text.count(end), 1, path)
+            self.assertLess(text.index(start), text.index(end), path)
 
     def test_documentation_has_risk_matrix_and_handoff(self):
         text = read(CODEX_DOC)

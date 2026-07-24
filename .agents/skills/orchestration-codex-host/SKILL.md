@@ -17,7 +17,21 @@ governance authority
 != external reviewer
 ```
 
-Read and follow every reference in order:
+## Execution-phase boundary
+
+There are two non-interchangeable modes:
+
+- **Controller mode** builds and validates the complete packet. In this mode,
+  read and follow every reference below in order.
+- **Runner-dispatched provider mode** is active only when the provider prompt
+  says `Provider execution phase: substantive_only`. The controller has already
+  completed kickoff/go identity, authorization, routing, model/effort, and Git
+  preflight. In this mode, do not execute the controller references, do not
+  inspect whether plan/candidate/governance identities exist in the target
+  repository, and do not adjudicate them. Execute only the provider substantive
+  task and return only the selected role schema.
+
+In controller mode, read and follow every reference in order:
 
 1. [kickoff](references/kickoff.md) — identify the authoritative plan and
    materialize the complete packet, then stop while authorization is absent.
@@ -40,10 +54,11 @@ active host. It may execute scout only when Codex Desktop dispatches the exact
 
 The prior native scout sandbox was shown not to enforce read-only in the
 observed embedded runtime and is not a security boundary. The host-local Luna
-recheck later proved runner read-only enforcement but exposed an over-broad
-provider transport: feasibility content used reviewer-only collections and was
-rejected. The canonical schema now supplies role-specific transports; a
-Luna-only confirmation remains pending independent authorization. The
-controller-owned scout contract pins CLI reasoning effort to `low`; it must not
-inherit a global or parent-session thinking level. Existing Terra/Sol and
-schema-v3 reviewer evidence is preserved.
+rechecks proved runner read-only enforcement. The first exposed an over-broad
+provider transport; a later Luna/low formal run passed transport validation but
+repeated controller-only identity checks and returned the unsupported verdict
+`BLOCKED`. The runner now keeps the complete packet controller-side, sends Luna
+only a marker-delimited substantive task, and constrains feasibility verdicts
+in the role schema. A post-corrective real confirmation remains pending
+separate authorization. Existing Terra/Sol and schema-v3 reviewer evidence is
+preserved.
