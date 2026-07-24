@@ -11,7 +11,8 @@ Record:
 - current control-window authorization;
 - Codex Desktop host thread UUID;
 - native child thread/task UUID, or host-local CLI session ID for scout;
-- selected tier, configured model, and actual model evidence;
+- selected tier and actual model evidence, including configured/requested/
+  resolved model and reasoning effort plus provider metadata when available;
 - exact worktree, pre/post branch, HEAD, status, and ancestry;
 - changed files and diff scope;
 - every acceptance command and actual result;

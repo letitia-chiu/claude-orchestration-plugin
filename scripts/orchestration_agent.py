@@ -80,6 +80,7 @@ EXTERNAL_PROVIDERS = frozenset({"codex_cli", "claude_cli"})
 HOST_MODES = ("claude_hosted", "codex_hosted")
 INVOCATION_PATHS = ("active_host", "host_local_cli", "external_cli", "headless_cli")
 HOST_TIERS = ("scout", "worker", "executor")
+REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 GOVERNANCE_IDENTITY_FIELDS = (
     "governance_authority",
     "authorization_issuer",
@@ -155,7 +156,13 @@ CONTROLLER_OWNED_RESULT_FIELDS = frozenset(
         "provider",
         "profile",
         "requested_model",
+        "resolved_model",
         "reported_model",
+        "requested_reasoning_effort",
+        "resolved_reasoning_effort",
+        "reported_reasoning_effort",
+        "reasoning_effort",
+        "model_reasoning_effort",
         "model",
         "invocation_path",
         "session_id",
@@ -463,6 +470,12 @@ def validate_routing(routing):
                     "host mode %s tier %s: model_override must be a non-empty string or null"
                     % (mode_name, tier_name)
                 )
+            effort = tier.get("reasoning_effort", None)
+            if effort is not None and effort not in REASONING_EFFORTS:
+                errors.append(
+                    "host mode %s tier %s: reasoning_effort must be one of %s or omitted"
+                    % (mode_name, tier_name, sorted(REASONING_EFFORTS))
+                )
         if mode_name == "codex_hosted" and tiers:
             scout = tiers.get("scout", {})
             expected_scout = {
@@ -470,6 +483,7 @@ def validate_routing(routing):
                 "profile": "codex_read_only",
                 "invocation_path": "host_local_cli",
                 "model_override": "gpt-5.6-luna",
+                "reasoning_effort": "low",
             }
             if scout != expected_scout:
                 errors.append(
@@ -660,6 +674,14 @@ def resolve_tier_model(routing, host_mode, tier):
     return tiers[tier].get("model_override")
 
 
+def resolve_tier_reasoning_effort(routing, host_mode, tier):
+    """Return the controller-owned reasoning effort for a host tier."""
+    tiers = resolve_host_mode(routing, host_mode)["local_tiers"]
+    if tier not in tiers:
+        raise ConfigError("host mode %s does not define tier %s" % (host_mode, tier))
+    return tiers[tier].get("reasoning_effort")
+
+
 # ---------------------------------------------------------------------------
 # Provider argv construction
 # ---------------------------------------------------------------------------
@@ -743,7 +765,13 @@ def normalize_provider_result(result, role):
 
 
 def build_provider_command(
-    provider, profile, model, workdir, artifact_dir, provider_schema_file
+    provider,
+    profile,
+    model,
+    reasoning_effort,
+    workdir,
+    artifact_dir,
+    provider_schema_file,
 ):
     """Return (argv, provider_metadata) for the single external process."""
     if provider == "codex_cli":
@@ -751,6 +779,14 @@ def build_provider_command(
         argv = [
             "codex",
             "exec",
+        ]
+        if reasoning_effort is not None:
+            if reasoning_effort not in REASONING_EFFORTS:
+                raise ConfigError(
+                    "unsupported Codex reasoning effort: %r" % reasoning_effort
+                )
+            argv += ["--ignore-user-config", "--strict-config"]
+        argv += [
             "-C",
             str(workdir),
             "-s",
@@ -758,6 +794,8 @@ def build_provider_command(
             "-c",
             "approval_policy=never",
         ]
+        if reasoning_effort is not None:
+            argv += ["-c", "model_reasoning_effort=%s" % reasoning_effort]
         network = None
         if profile == "codex_workspace_write":
             argv += ["-c", "sandbox_workspace_write.network_access=false"]
@@ -783,6 +821,8 @@ def build_provider_command(
             "sandbox": sandbox,
             "approval_policy": "approval_policy=never (config override; codex exec has no approval flag)",
             "network": network,
+            "user_config_ignored": reasoning_effort is not None,
+            "strict_config": reasoning_effort is not None,
         }
         return argv, metadata
     if provider == "claude_cli":
@@ -815,6 +855,8 @@ def build_provider_command(
             "sandbox": "permission-mode=plan; tools allowlist Read,Glob,Grep; deny Bash,Edit,Write,NotebookEdit,Task; strict MCP (none); slash commands disabled",
             "approval_policy": "n/a (non-interactive -p, plan permission mode)",
             "network": None,
+            "user_config_ignored": None,
+            "strict_config": None,
         }
         return argv, metadata
     raise ConfigError("no external command semantics for provider %s" % provider)
@@ -909,14 +951,21 @@ def _extract_provider_metadata(stdout_path):
     output-validation failure. Session/thread IDs are likewise event evidence.
     """
     reported_model = None
+    reported_reasoning_effort = None
     session_id = None
 
     def visit(value):
-        nonlocal reported_model, session_id
+        nonlocal reported_model, reported_reasoning_effort, session_id
         if isinstance(value, dict):
             for key, item in value.items():
                 if key == "model" and isinstance(item, str) and item:
                     reported_model = item
+                elif (
+                    key in ("reasoning_effort", "model_reasoning_effort")
+                    and isinstance(item, str)
+                    and item
+                ):
+                    reported_reasoning_effort = item
                 elif key in ("session_id", "thread_id") and isinstance(item, str) and item:
                     session_id = item
                 visit(item)
@@ -933,7 +982,11 @@ def _extract_provider_metadata(stdout_path):
                     continue
     except OSError:
         pass
-    return {"reported_model": reported_model, "session_id": session_id}
+    return {
+        "reported_model": reported_model,
+        "reported_reasoning_effort": reported_reasoning_effort,
+        "session_id": session_id,
+    }
 
 
 def _extract_claude_result(stdout_path):
@@ -1205,7 +1258,11 @@ def cmd_run(args):
         "provider": None,
         "profile": None,
         "requested_model": args.model,
+        "resolved_model": None,
         "reported_model": None,
+        "requested_reasoning_effort": args.reasoning_effort,
+        "resolved_reasoning_effort": None,
+        "reported_reasoning_effort": None,
         "executable": None,
         "cli_version": None,
         "workdir": str(args.workdir),
@@ -1218,6 +1275,8 @@ def cmd_run(args):
         "sandbox": None,
         "approval_policy": None,
         "network": None,
+        "user_config_ignored": None,
+        "strict_config": None,
         "allowed_files": sorted(args.allowed_file or []),
         "forbidden_files": sorted(args.forbidden_file or []),
         "started_at": None,
@@ -1376,6 +1435,11 @@ def cmd_run(args):
         # the active host; only the adversarial reviewer (and the separately
         # authorized headless implementer) ever reach an external CLI here.
         if args.role == "adversarial_reviewer":
+            if args.reasoning_effort is not None:
+                raise ConfigError(
+                    "reasoning effort is controller-owned only for the "
+                    "Codex-hosted host_local_cli scout"
+                )
             if args.invocation_path != "external_cli":
                 raise ConfigError(
                     "adversarial_reviewer runs only via invocation path external_cli"
@@ -1395,17 +1459,36 @@ def cmd_run(args):
                     )
                 scout = host_conf["local_tiers"]["scout"]
                 provider, profile = scout["provider"], scout["profile"]
+                resolved_model = scout.get("model_override")
+                resolved_reasoning_effort = scout.get("reasoning_effort")
                 if (
                     provider != "codex_cli"
                     or profile != "codex_read_only"
-                    or scout.get("model_override") != "gpt-5.6-luna"
-                    or args.model != "gpt-5.6-luna"
+                    or resolved_model != "gpt-5.6-luna"
+                    or resolved_reasoning_effort != "low"
+                    or args.model != resolved_model
+                    or args.reasoning_effort != resolved_reasoning_effort
                 ):
                     raise ConfigError(
                         "host_local_cli is restricted to codex_hosted/"
                         "feasibility_verifier/scout/codex_cli/codex_read_only/"
-                        "gpt-5.6-luna"
+                        "gpt-5.6-luna/reasoning_effort=low"
                     )
+                packet_effort, packet_effort_error = _parse_packet_identity(
+                    packet_text,
+                    (
+                        "Host-local reasoning effort",
+                        "Requested reasoning effort",
+                        "Reasoning effort",
+                    ),
+                )
+                if packet_effort_error or packet_effort != resolved_reasoning_effort:
+                    raise ConfigError(
+                        "host-local scout packet, routing, and CLI must all "
+                        "specify reasoning effort low"
+                    )
+                invocation["resolved_model"] = resolved_model
+                invocation["resolved_reasoning_effort"] = resolved_reasoning_effort
             elif args.invocation_path != "active_host":
                 raise ConfigError(
                     "feasibility_verifier is an active-host responsibility "
@@ -1427,6 +1510,11 @@ def cmd_run(args):
                     % host_conf["active_host"],
                 )
         elif args.role == "implementer":
+            if args.reasoning_effort is not None:
+                raise ConfigError(
+                    "reasoning effort is controller-owned only for the "
+                    "Codex-hosted host_local_cli scout"
+                )
             if args.invocation_path == "active_host":
                 if args.host_tier not in ("worker", "executor"):
                     raise ConfigError(
@@ -1461,6 +1549,8 @@ def cmd_run(args):
 
         invocation["provider"] = provider
         invocation["profile"] = profile
+        if invocation["resolved_model"] is None:
+            invocation["resolved_model"] = args.model
         if provider not in EXTERNAL_PROVIDERS:
             raise ConfigError("unsupported external provider: %s" % provider)
 
@@ -1571,7 +1661,8 @@ def cmd_run(args):
         argv, provider_meta = build_provider_command(
             provider,
             profile,
-            args.model,
+            invocation["resolved_model"],
+            invocation["resolved_reasoning_effort"],
             workdir,
             artifact_dir,
             provider_schema_file,
@@ -1579,6 +1670,8 @@ def cmd_run(args):
         invocation["sandbox"] = provider_meta["sandbox"]
         invocation["approval_policy"] = provider_meta["approval_policy"]
         invocation["network"] = provider_meta["network"]
+        invocation["user_config_ignored"] = provider_meta["user_config_ignored"]
+        invocation["strict_config"] = provider_meta["strict_config"]
         invocation["argv"] = sanitize_argv(argv)
         invocation["executable"] = shutil.which(argv[0])
         if invocation["executable"] is None:
@@ -1658,6 +1751,9 @@ def cmd_run(args):
             _write_json(artifact_dir / "provider-result.json", result)
     provider_metadata = _extract_provider_metadata(stdout_path)
     invocation["reported_model"] = provider_metadata["reported_model"]
+    invocation["reported_reasoning_effort"] = provider_metadata[
+        "reported_reasoning_effort"
+    ]
     invocation["session_id"] = provider_metadata["session_id"]
 
     # ---- classification (priority: never let a lesser class mask a safety failure) ----
@@ -1694,6 +1790,32 @@ def cmd_run(args):
         )
     if result is None:
         return finish(INVALID_OUTPUT, result_error or "final structured result missing")
+    if args.invocation_path == "host_local_cli":
+        if (
+            provider_metadata["reported_model"] is not None
+            and provider_metadata["reported_model"] != invocation["resolved_model"]
+        ):
+            return finish(
+                INVALID_OUTPUT,
+                "host-local scout reported model %r, expected %r"
+                % (
+                    provider_metadata["reported_model"],
+                    invocation["resolved_model"],
+                ),
+            )
+        if (
+            provider_metadata["reported_reasoning_effort"] is not None
+            and provider_metadata["reported_reasoning_effort"]
+            != invocation["resolved_reasoning_effort"]
+        ):
+            return finish(
+                INVALID_OUTPUT,
+                "host-local scout reported reasoning effort %r, expected %r"
+                % (
+                    provider_metadata["reported_reasoning_effort"],
+                    invocation["resolved_reasoning_effort"],
+                ),
+            )
     transport_errors = validate_provider_transport_result(result, provider_schema)
     if transport_errors:
         return finish(
@@ -1719,7 +1841,13 @@ def cmd_run(args):
         "provider": provider,
         "profile": profile,
         "requested_model": args.model,
+        "resolved_model": invocation["resolved_model"],
         "reported_model": provider_metadata["reported_model"],
+        "requested_reasoning_effort": args.reasoning_effort,
+        "resolved_reasoning_effort": invocation["resolved_reasoning_effort"],
+        "reported_reasoning_effort": provider_metadata[
+            "reported_reasoning_effort"
+        ],
         "invocation_path": args.invocation_path,
         "session_id": provider_metadata["session_id"],
     }
@@ -1788,6 +1916,11 @@ def build_parser():
     run_parser.add_argument("--artifact-dir", required=True)
     run_parser.add_argument("--timeout-seconds", required=True, type=_positive_int)
     run_parser.add_argument("--model", required=True)
+    run_parser.add_argument(
+        "--reasoning-effort",
+        help="controller-owned Codex reasoning effort; required and fixed to "
+        "low only for the Codex-hosted host_local_cli scout",
+    )
     run_parser.add_argument("--authoritative-plan-sha")
     run_parser.add_argument("--candidate-sha")
     run_parser.add_argument("--target-repository-head")

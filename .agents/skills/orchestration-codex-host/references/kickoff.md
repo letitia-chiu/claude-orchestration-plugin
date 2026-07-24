@@ -22,6 +22,7 @@ Collect the execution identity:
 - invocation path: `host_local_cli` for scout; `active_host` for worker/executor
 - host-local tier: `scout`, `worker`, or `executor`
 - exact host-local model
+- exact host-local reasoning effort (`low` for Codex-hosted scout)
 - repository and absolute worktree
 - authoritative plan SHA
 - plugin/release implementation candidate SHA

@@ -43,5 +43,7 @@ observed embedded runtime and is not a security boundary. The host-local Luna
 recheck later proved runner read-only enforcement but exposed an over-broad
 provider transport: feasibility content used reviewer-only collections and was
 rejected. The canonical schema now supplies role-specific transports; a
-Luna-only confirmation remains pending independent authorization. Existing
-Terra/Sol and schema-v3 reviewer evidence is preserved.
+Luna-only confirmation remains pending independent authorization. The
+controller-owned scout contract pins CLI reasoning effort to `low`; it must not
+inherit a global or parent-session thinking level. Existing Terra/Sol and
+schema-v3 reviewer evidence is preserved.

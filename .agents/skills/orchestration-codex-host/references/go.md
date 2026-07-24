@@ -30,7 +30,10 @@ Verify:
 - active execution host is exactly `codex_desktop`;
 - invocation path is `host_local_cli` for scout and `active_host` for
   worker/executor;
-- scout resolves exactly to `codex_cli / codex_read_only / gpt-5.6-luna`;
+- scout resolves exactly to
+  `codex_cli / codex_read_only / gpt-5.6-luna / reasoning_effort=low`;
+- scout packet, routing, and runner CLI all explicitly agree on `low`; missing
+  effort, `medium`, `high`, or the UI label `Light` fails before spawn;
 - worker/executor resolve to their native Desktop agents;
 - model matches the selected agent definition or an explicit packet-authorized
   project-local override;

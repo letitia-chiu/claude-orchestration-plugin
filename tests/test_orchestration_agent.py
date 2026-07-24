@@ -97,6 +97,7 @@ PACKET_HOST_LOCAL_ALLOW = (
     "fake host-local scout packet\n"
     "External-side-effect authorization: NONE\n"
     "Host-local execution authorization: ALLOW_HOST_LOCAL_CLI_INVOCATION\n"
+    "Host-local reasoning effort: low\n"
 )
 
 # Default invocation path per role for test convenience (each test may override).
@@ -277,6 +278,7 @@ class RunnerTestCase(unittest.TestCase):
         repo=None,
         extra_env=None,
         model="fake-model-1",
+        reasoning_effort=None,
         packet_text=PACKET_ALLOW,
         flag_auth="ALLOW_PROVIDER_INVOCATION",
         host_local_auth=None,
@@ -302,6 +304,8 @@ class RunnerTestCase(unittest.TestCase):
             os.environ["FAKE_FINAL_RESULT"] = json.dumps(final)
         for key, value in (extra_env or {}).items():
             os.environ[key] = value
+        if invocation_path == "host_local_cli":
+            os.environ.setdefault("FAKE_REPORTED_MODEL", model)
         actual_head = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "HEAD"],
             check=True,
@@ -350,6 +354,8 @@ class RunnerTestCase(unittest.TestCase):
             "--model",
             model,
         ]
+        if reasoning_effort is not None:
+            argv += ["--reasoning-effort", reasoning_effort]
         for flag, value in (
             ("--authoritative-plan-sha", authoritative_plan_sha),
             ("--candidate-sha", candidate_sha),
@@ -637,6 +643,7 @@ class DualHostMatrixTests(RunnerTestCase):
             invocation_path="host_local_cli",
             host_tier="scout",
             model="gpt-5.6-luna",
+            reasoning_effort="low",
             packet_text=PACKET_HOST_LOCAL_ALLOW,
             flag_auth=None,
             host_local_auth="ALLOW_HOST_LOCAL_CLI_INVOCATION",
@@ -1439,7 +1446,11 @@ class StrictSchemaContractTests(unittest.TestCase):
             "provider",
             "profile",
             "requested_model",
+            "resolved_model",
             "reported_model",
+            "requested_reasoning_effort",
+            "resolved_reasoning_effort",
+            "reported_reasoning_effort",
             "session_id",
         ):
             self.assertIn(field, required, field)
@@ -1900,6 +1911,7 @@ class CorrectiveC2ContractTests(RunnerTestCase):
             "invocation_path": "host_local_cli",
             "host_tier": "scout",
             "model": "gpt-5.6-luna",
+            "reasoning_effort": "low",
             "packet_text": PACKET_HOST_LOCAL_ALLOW,
             "flag_auth": None,
             "host_local_auth": "ALLOW_HOST_LOCAL_CLI_INVOCATION",
@@ -1910,7 +1922,13 @@ class CorrectiveC2ContractTests(RunnerTestCase):
 
     def test_external_reviewer_token_cannot_authorize_host_local_scout(self):
         kwargs = self.scout_kwargs()
-        kwargs.update(packet_text=PACKET_ALLOW, flag_auth="ALLOW_PROVIDER_INVOCATION")
+        kwargs.update(
+            packet_text=(
+                PACKET_ALLOW
+                + "Host-local reasoning effort: low\n"
+            ),
+            flag_auth="ALLOW_PROVIDER_INVOCATION",
+        )
         rc, artifacts, _, _ = self.run_runner("feasibility_verifier", **kwargs)
         self.assertEqual(rc, 2)
         self.assertIn("cannot authorize host_local_cli", self.assert_outcome(
@@ -2042,6 +2060,182 @@ class CorrectiveC2ContractTests(RunnerTestCase):
         )
 
 
+class ScoutLowEffortCorrectiveTests(RunnerTestCase):
+    """Pin Codex-hosted scout to Luna/low before any provider spawn."""
+
+    def scout_kwargs(self):
+        return {
+            "host_mode": "codex_hosted",
+            "invocation_path": "host_local_cli",
+            "host_tier": "scout",
+            "model": "gpt-5.6-luna",
+            "reasoning_effort": "low",
+            "packet_text": PACKET_HOST_LOCAL_ALLOW,
+            "flag_auth": None,
+            "host_local_auth": "ALLOW_HOST_LOCAL_CLI_INVOCATION",
+            "final": make_result(
+                "feasibility_verifier", "codex_cli", "codex_read_only"
+            ),
+        }
+
+    def run_scout(self, **overrides):
+        kwargs = self.scout_kwargs()
+        kwargs.update(overrides)
+        return self.run_runner("feasibility_verifier", **kwargs)
+
+    def assert_pre_spawn_failure(self, **overrides):
+        argv_file = self.tmp / ("not-spawned-" + uuid.uuid4().hex + ".json")
+        extra_env = dict(overrides.pop("extra_env", {}))
+        extra_env["FAKE_ARGV_FILE"] = str(argv_file)
+        rc, artifacts, _, _ = self.run_scout(
+            extra_env=extra_env, **overrides
+        )
+        self.assertEqual(rc, 2)
+        invocation = self.assert_outcome(artifacts, "CONFIGURATION_ERROR")
+        self.assertFalse(argv_file.exists(), invocation["detail"])
+        return invocation
+
+    def test_fake_codex_argv_pins_low_and_ignores_global_config(self):
+        argv_file = self.tmp / "captured-argv.json"
+        codex_home = self.tmp / "codex-home"
+        codex_home.mkdir()
+        (codex_home / "config.toml").write_text(
+            'model_reasoning_effort = "high"\n',
+            encoding="utf-8",
+        )
+        rc, artifacts, _, _ = self.run_scout(
+            extra_env={
+                "FAKE_ARGV_FILE": str(argv_file),
+                "CODEX_HOME": str(codex_home),
+            }
+        )
+        self.assertEqual(rc, 0)
+        argv = json.loads(argv_file.read_text(encoding="utf-8"))
+        self.assertIn("--ignore-user-config", argv)
+        self.assertIn("--strict-config", argv)
+        self.assertIn("model_reasoning_effort=low", argv)
+        effort_index = argv.index("model_reasoning_effort=low")
+        self.assertEqual(argv[effort_index - 1], "-c")
+        self.assertNotIn("model_reasoning_effort=high", argv)
+        self.assertEqual(argv[argv.index("-m") + 1], "gpt-5.6-luna")
+        invocation = self.assert_outcome(artifacts, "SUCCESS")
+        self.assertIs(invocation["user_config_ignored"], True)
+        self.assertIs(invocation["strict_config"], True)
+
+    def test_invocation_and_provenance_preserve_requested_resolved_identity(self):
+        rc, artifacts, _, _ = self.run_scout()
+        self.assertEqual(rc, 0)
+        invocation = self.assert_outcome(artifacts, "SUCCESS")
+        for source in (
+            invocation,
+            json.loads((artifacts / "final-result.json").read_text())[
+                "provenance"
+            ],
+        ):
+            self.assertEqual(source["requested_model"], "gpt-5.6-luna")
+            self.assertEqual(source["resolved_model"], "gpt-5.6-luna")
+            self.assertEqual(source["requested_reasoning_effort"], "low")
+            self.assertEqual(source["resolved_reasoning_effort"], "low")
+            self.assertEqual(source["reported_model"], "gpt-5.6-luna")
+            self.assertIsNone(source["reported_reasoning_effort"])
+
+    def test_missing_cli_effort_fails_before_spawn(self):
+        invocation = self.assert_pre_spawn_failure(reasoning_effort=None)
+        self.assertIn("reasoning_effort=low", invocation["detail"])
+
+    def test_medium_cli_effort_fails_before_spawn(self):
+        invocation = self.assert_pre_spawn_failure(reasoning_effort="medium")
+        self.assertIn("reasoning_effort=low", invocation["detail"])
+
+    def test_high_cli_effort_fails_before_spawn(self):
+        invocation = self.assert_pre_spawn_failure(reasoning_effort="high")
+        self.assertIn("reasoning_effort=low", invocation["detail"])
+
+    def test_missing_routing_effort_fails_before_spawn(self):
+        data = default_routing()
+        del data["host_modes"]["codex_hosted"]["local_tiers"]["scout"][
+            "reasoning_effort"
+        ]
+        invocation = self.assert_pre_spawn_failure(routing=data)
+        self.assertIn("routing validation failed", invocation["detail"])
+
+    def test_medium_routing_effort_fails_before_spawn(self):
+        data = default_routing()
+        data["host_modes"]["codex_hosted"]["local_tiers"]["scout"][
+            "reasoning_effort"
+        ] = "medium"
+        invocation = self.assert_pre_spawn_failure(routing=data)
+        self.assertIn("routing validation failed", invocation["detail"])
+
+    def test_missing_packet_effort_fails_before_spawn(self):
+        packet = PACKET_HOST_LOCAL_ALLOW.replace(
+            "Host-local reasoning effort: low\n", ""
+        )
+        invocation = self.assert_pre_spawn_failure(packet_text=packet)
+        self.assertIn("packet, routing, and CLI", invocation["detail"])
+
+    def test_medium_packet_effort_fails_before_spawn(self):
+        packet = PACKET_HOST_LOCAL_ALLOW.replace(
+            "Host-local reasoning effort: low",
+            "Host-local reasoning effort: medium",
+        )
+        invocation = self.assert_pre_spawn_failure(packet_text=packet)
+        self.assertIn("packet, routing, and CLI", invocation["detail"])
+
+    def test_provider_cannot_supply_controller_reasoning_effort(self):
+        final = make_result(
+            "feasibility_verifier",
+            "codex_cli",
+            "codex_read_only",
+            requested_reasoning_effort="high",
+        )
+        rc, artifacts, _, _ = self.run_scout(final=final)
+        self.assertEqual(rc, 1)
+        detail = self.assert_outcome(artifacts, "INVALID_OUTPUT")["detail"]
+        self.assertIn("controller-owned", detail)
+        self.assertFalse((artifacts / "final-result.json").exists())
+
+    def test_reported_effort_mismatch_is_invalid_output(self):
+        original = oa._extract_provider_metadata
+        oa._extract_provider_metadata = lambda _: {
+            "reported_model": "gpt-5.6-luna",
+            "reported_reasoning_effort": "high",
+            "session_id": "00000000-0000-0000-0000-000000000001",
+        }
+        try:
+            rc, artifacts, _, _ = self.run_scout()
+        finally:
+            oa._extract_provider_metadata = original
+        self.assertEqual(rc, 1)
+        detail = self.assert_outcome(artifacts, "INVALID_OUTPUT")["detail"]
+        self.assertIn("reported reasoning effort", detail)
+
+    def test_reported_model_mismatch_is_invalid_output(self):
+        rc, artifacts, _, _ = self.run_scout(
+            extra_env={"FAKE_REPORTED_MODEL": "gpt-5.6-terra"}
+        )
+        self.assertEqual(rc, 1)
+        detail = self.assert_outcome(artifacts, "INVALID_OUTPUT")["detail"]
+        self.assertIn("reported model", detail)
+
+    def test_schema_provenance_requires_model_and_effort_resolution(self):
+        schema = json.loads(
+            (PLUGIN_ROOT / "examples" / "schemas" / "orchestration-result.schema.json")
+            .read_text(encoding="utf-8")
+        )
+        required = set(schema["$defs"]["provenance"]["required"])
+        self.assertTrue(
+            {
+                "requested_model",
+                "resolved_model",
+                "reported_model",
+                "requested_reasoning_effort",
+                "resolved_reasoning_effort",
+                "reported_reasoning_effort",
+            }.issubset(required)
+        )
+
+
 class CorrectiveC3RoleSchemaTests(RunnerTestCase):
     """C3: select narrow role transports and normalize canonical empties."""
 
@@ -2056,6 +2250,7 @@ class CorrectiveC3RoleSchemaTests(RunnerTestCase):
             "invocation_path": "host_local_cli",
             "host_tier": "scout",
             "model": "gpt-5.6-luna",
+            "reasoning_effort": "low",
             "packet_text": PACKET_HOST_LOCAL_ALLOW,
             "flag_auth": None,
             "host_local_auth": "ALLOW_HOST_LOCAL_CLI_INVOCATION",

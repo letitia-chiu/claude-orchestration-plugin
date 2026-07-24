@@ -8,7 +8,7 @@ Codex Desktop controls both paths, but their execution mechanisms differ:
 
 | Tier | Invocation | Provider/profile | Default model | Use |
 |---|---|---|---|---|
-| scout | `host_local_cli` | `codex_cli / codex_read_only` | `gpt-5.6-luna` | read-only inventory and narrow feasibility |
+| scout | `host_local_cli` | `codex_cli / codex_read_only` | `gpt-5.6-luna / low` | read-only inventory and narrow feasibility |
 | worker | `active_host` | `.codex/agents/worker.toml` / `codex_native` | `gpt-5.6-terra` | one specified invariant or defect family |
 | executor | `active_host` | `.codex/agents/executor.toml` / `codex_native` | `gpt-5.6-sol` | cross-module, high-risk, or contractual closure |
 
@@ -18,6 +18,11 @@ authorization at `NONE`. It uses runner mutation detection, transcript, Git
 evidence, and manifest, but remains an active-host local tier—not a reviewer,
 fallback, or source of governance authority. The native scout TOML was retired
 because its observed sandbox did not enforce read-only.
+
+The controller pins scout reasoning effort to the CLI value `low`. The runner
+passes `-c model_reasoning_effort=low`, ignores user config for that child, and
+fails before spawn if packet, routing, or caller differs. `Light` is a UI label,
+not the CLI value. No global default may silently upgrade scout effort.
 
 Worker/executor use distinct Codex Desktop child tasks; preserve thread UUID and
 actual model identity. The PATH Codex CLI is not the active host.

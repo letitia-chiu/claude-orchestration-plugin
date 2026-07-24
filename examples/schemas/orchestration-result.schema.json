@@ -39,7 +39,11 @@
         "provider",
         "profile",
         "requested_model",
+        "resolved_model",
         "reported_model",
+        "requested_reasoning_effort",
+        "resolved_reasoning_effort",
+        "reported_reasoning_effort",
         "invocation_path",
         "session_id"
       ],
@@ -106,7 +110,19 @@
         "requested_model": {
           "type": "string"
         },
+        "resolved_model": {
+          "type": "string"
+        },
         "reported_model": {
+          "type": ["string", "null"]
+        },
+        "requested_reasoning_effort": {
+          "type": ["string", "null"]
+        },
+        "resolved_reasoning_effort": {
+          "type": ["string", "null"]
+        },
+        "reported_reasoning_effort": {
           "type": ["string", "null"]
         },
         "invocation_path": {

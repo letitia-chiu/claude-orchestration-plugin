@@ -149,6 +149,7 @@ class NativeAgentTests(unittest.TestCase):
                 "profile": "codex_read_only",
                 "invocation_path": "host_local_cli",
                 "model_override": "gpt-5.6-luna",
+                "reasoning_effort": "low",
             },
         )
 

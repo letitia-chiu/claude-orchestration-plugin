@@ -17,6 +17,7 @@
 | Active execution host | `codex_desktop` |
 | Host-local tier | `<scout, worker, or executor>` |
 | Host-local model | `<gpt-5.6-luna, gpt-5.6-terra, or gpt-5.6-sol matching the selected tier, unless an explicit project-local override is authorized>` |
+| Host-local reasoning effort | scout: `low`; worker: `medium`; executor: `high`（scout 的 CLI 值固定為 `low`，不得使用 UI 名稱 `Light`） |
 | Invocation path | scout: `host_local_cli`; worker/executor: `active_host` |
 | External reviewer provider/profile/model | `not applicable` — the implementer cannot dispatch a reviewer; review needs a new packet and authorization |
 | Role | `<feasibility_verifier or implementer>` |
@@ -56,7 +57,11 @@
   writes.
 - Conversation memory and previous sessions are not authorization.
 - Codex Desktop explicitly calls the runner only for the exact host-local scout
-  tuple. Worker/executor never use it. The PATH Codex CLI is not the active host.
+  tuple:
+  `host_local_cli / codex_cli / codex_read_only / gpt-5.6-luna /
+  reasoning_effort=low`. Packet, routing, and runner CLI must agree; missing or
+  different effort fails before spawn. Worker/executor never use the runner.
+  The PATH Codex CLI is not the active host.
 - Scout reports repository inventory and feasibility only through `summary` and
   `evidence`; its transport does not expose `changed_files`, `findings`,
   `observations`, `suggestions`, or `evidence_gaps`. Runner validates that
@@ -75,7 +80,8 @@
 ## Required wrap-up
 
 Record the governance and plan identities, Codex Desktop host thread UUID,
-native child thread/task UUID, selected tier, configured and actual model,
+native child thread/task UUID, selected tier, configured/requested/resolved
+model and reasoning effort plus actual provider metadata when available,
 pre/post Git evidence, exact changed files, test commands/results, Git actions,
 unsupported capabilities, and evidence gaps.
 

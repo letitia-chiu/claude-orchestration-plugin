@@ -726,7 +726,8 @@ Status evidence 使用 `CLEAN`，或由 controller 對 exact
           "provider": "codex_cli",
           "profile": "codex_read_only",
           "invocation_path": "host_local_cli",
-          "model_override": "gpt-5.6-luna"
+          "model_override": "gpt-5.6-luna",
+          "reasoning_effort": "low"
         },
         "worker": {
           "provider": "codex_native",

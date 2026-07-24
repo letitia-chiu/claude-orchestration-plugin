@@ -183,6 +183,21 @@ class TierModelMappingTests(unittest.TestCase):
         with self.assertRaises(oa.ConfigError):
             oa.resolve_tier_model(routing(), "claude_hosted", "hyperexecutor")
 
+    def test_codex_scout_reasoning_effort_is_controller_pinned_low(self):
+        self.assertEqual(
+            oa.resolve_tier_reasoning_effort(
+                routing(), "codex_hosted", "scout"
+            ),
+            "low",
+        )
+
+    def test_codex_native_worker_executor_routing_is_unchanged(self):
+        tiers = routing()["host_modes"]["codex_hosted"]["local_tiers"]
+        for tier in ("worker", "executor"):
+            self.assertEqual(tiers[tier]["provider"], "codex_native")
+            self.assertEqual(tiers[tier]["invocation_path"], "active_host")
+            self.assertNotIn("reasoning_effort", tiers[tier])
+
     def test_missing_tier_definition_fails_validation(self):
         data = routing()
         del data["host_modes"]["claude_hosted"]["local_tiers"]["scout"]
